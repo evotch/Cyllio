@@ -1,0 +1,68 @@
+[
+  {
+    "name": "api",
+    "project": "Cyllio.Api",
+    "image": "cyllio-api",
+    "external": true
+  },
+  {
+    "name": "identity",
+    "project": "Cyllio.Identity",
+    "image": "cyllio-identity",
+    "external": false
+  },
+  {
+    "name": "device",
+    "project": "Cyllio.Device",
+    "image": "cyllio-device",
+    "external": false
+  },
+  {
+    "name": "messaging",
+    "project": "Cyllio.Messaging",
+    "image": "cyllio-messaging",
+    "external": false
+  },
+  {
+    "name": "realtime",
+    "project": "Cyllio.Realtime.Gateway",
+    "image": "cyllio-realtime",
+    "external": true
+  },
+  {
+    "name": "group",
+    "project": "Cyllio.Group",
+    "image": "cyllio-group",
+    "external": false
+  },
+  {
+    "name": "media",
+    "project": "Cyllio.Media",
+    "image": "cyllio-media",
+    "external": false
+  },
+  {
+    "name": "key",
+    "project": "Cyllio.Key",
+    "image": "cyllio-key",
+    "external": false
+  },
+  {
+    "name": "call",
+    "project": "Cyllio.Call",
+    "image": "cyllio-call",
+    "external": false
+  },
+  {
+    "name": "notification",
+    "project": "Cyllio.Notification",
+    "image": "cyllio-notification",
+    "external": false
+  },
+  {
+    "name": "trust-safety",
+    "project": "Cyllio.TrustSafety",
+    "image": "cyllio-trust-safety",
+    "external": false
+  }
+]

@@ -1,0 +1,36 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore Cyllio.sln
+      - run: dotnet build Cyllio.sln -c Release --no-restore
+      - run: dotnet format Cyllio.sln --verify-no-changes --no-restore
+      - name: Validate infrastructure
+        run: |
+          az bicep install
+          az bicep build --file infra/platform.bicep
+          az bicep build --file infra/apps.bicep
+          az bicep build-params --file infra/parameters/dev.bicepparam
+          az bicep build-params --file infra/parameters/prod.bicepparam
+      - name: Build and smoke test every service
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker logs service-smoke 2>/dev/null || true; docker rm -f service-smoke 2>/dev/null || true' EXIT
+          while IFS=$'\t' read -r project image; do
+            docker build --build-arg SERVICE_PROJECT="$project" -t "$image:ci" .
+            docker run -d --name service-smoke -p 127.0.0.1:8080:8080 "$image:ci"
+            curl --fail --retry 12 --retry-all-errors --retry-delay 2 http://localhost:8080/health/ready
+            docker rm -f service-smoke
+          done < <(jq -r '.[] | [.project, .image] | @tsv' services.json)

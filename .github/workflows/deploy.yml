@@ -1,0 +1,72 @@
+name: Deploy Azure
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      LOCATION: ${{ vars.AZURE_LOCATION }}
+      TARGET_ENV: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build Cyllio.sln -c Release
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy platform
+        id: platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RESOURCE_GROUP:?Set AZURE_RESOURCE_GROUP}"
+          : "${LOCATION:?Set AZURE_LOCATION}"
+          az bicep install
+          az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --output none
+          az deployment group create --name platform --resource-group "$RESOURCE_GROUP"             --template-file infra/platform.bicep --parameters "infra/parameters/$TARGET_ENV.bicepparam"             --parameters location="$LOCATION" --output json > "$RUNNER_TEMP/platform.json"
+          for key in registryName registryServer identityId environmentId; do
+            value=$(jq -r ".properties.outputs.$key.value" "$RUNNER_TEMP/platform.json")
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+      - name: Build and push all service images
+        env:
+          REGISTRY: ${{ steps.platform.outputs.registryName }}
+          SERVER: ${{ steps.platform.outputs.registryServer }}
+        run: |
+          set -euo pipefail
+          az acr login --name "$REGISTRY"
+          while IFS=$'\t' read -r project image; do
+            docker build --build-arg SERVICE_PROJECT="$project" -t "$SERVER/$image:$GITHUB_SHA" .
+            docker push "$SERVER/$image:$GITHUB_SHA"
+          done < <(jq -r '.[] | [.project, .image] | @tsv' services.json)
+      - name: Deploy services and verify public endpoints
+        env:
+          SERVER: ${{ steps.platform.outputs.registryServer }}
+          IDENTITY: ${{ steps.platform.outputs.identityId }}
+          APPS_ENVIRONMENT: ${{ steps.platform.outputs.environmentId }}
+        run: |
+          set -euo pipefail
+          az deployment group create --name apps --resource-group "$RESOURCE_GROUP"             --template-file infra/apps.bicep --parameters environment="$TARGET_ENV" location="$LOCATION"             registryServer="$SERVER" identityId="$IDENTITY" environmentId="$APPS_ENVIRONMENT" imageTag="$GITHUB_SHA"             --query properties.outputs.serviceUrls.value --output json > "$RUNNER_TEMP/service-urls.json"
+          while IFS=$'\t' read -r name url; do
+            curl --fail --retry 15 --retry-all-errors --retry-delay 5 "$url/health/ready"
+            echo "$name: $url" >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -r '.[] | select(.external) | [.name, .url] | @tsv' "$RUNNER_TEMP/service-urls.json")
