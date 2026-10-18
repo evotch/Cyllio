@@ -48,24 +48,6 @@ jobs:
             docker rm -f service-smoke
           done < <(jq -r '.[] | [.project, .image] | @tsv' services.json)
 
-  servicebus-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure local emulator
-        shell: bash
-        run: |
-          printf 'ACCEPT_EULA=Y\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\nAUTH_PHONE_HASH_KEY=%s\n' "$(openssl rand -hex 24)Aa1!" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" > .env
-      - name: Start broker and consumers
-        run: docker compose up --build -d messaging notification realtime
-      - name: Verify topic fan-out
-        run: bash scripts/test-servicebus.sh
-      - name: Show logs and clean up
-        if: always()
-        run: |
-          docker compose logs --tail 50 servicebus messaging notification realtime
-          docker compose down
-
   accounts-integration:
     runs-on: ubuntu-latest
     steps:

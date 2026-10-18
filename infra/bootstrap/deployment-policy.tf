@@ -41,7 +41,7 @@ resource "aws_iam_policy" "deployment" {
     },
     {
       Sid       = "ServiceLinkedRoles", Effect = "Allow", Action = ["iam:CreateServiceLinkedRole"], Resource = "*",
-      Condition = { StringEquals = { "iam:AWSServiceName" = ["ecs.amazonaws.com", "elasticloadbalancing.amazonaws.com", "apigateway.amazonaws.com", "elasticache.amazonaws.com", "servicediscovery.amazonaws.com"] } }
+      Condition = { StringEquals = { "iam:AWSServiceName" = ["ecs.amazonaws.com", "elasticloadbalancing.amazonaws.com", "ops.apigateway.amazonaws.com", "elasticache.amazonaws.com", "servicediscovery.amazonaws.com"] } }
     },
     {
       Sid    = "PrivateNamespace", Effect = "Allow", Resource = "*",

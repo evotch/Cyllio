@@ -94,6 +94,15 @@ run "generated_environment_policies" {
     ])
     error_message = "Generated deployment policies must scope S3 access by environment."
   }
+  assert {
+    condition = alltrue([for policy in aws_iam_policy.deployment :
+      contains(
+        one([for statement in jsondecode(policy.policy).Statement : statement if statement.Sid == "ServiceLinkedRoles"]).Condition.StringEquals["iam:AWSServiceName"],
+        "ops.apigateway.amazonaws.com"
+      )
+    ])
+    error_message = "API Gateway VPC links require the ops.apigateway.amazonaws.com service-linked-role principal."
+  }
 }
 
 run "immutable_repository_subject" {
