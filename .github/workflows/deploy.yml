@@ -28,8 +28,35 @@ concurrency:
 jobs:
   validate:
     uses: ./.github/workflows/ci.yml
+
+  staging-config:
+    runs-on: ubuntu-latest
+    environment: stg
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate actual staging configuration
+        env:
+          STAGING_ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging_file="$RUNNER_TEMP/.env.stg"
+          trap 'rm -f "$staging_file"' EXIT
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          contents = os.environ.get('STAGING_ENV_FILE', '')
+          if not contents.strip():
+              raise SystemExit('STAGING_ENV_FILE is unavailable to this job in GitHub environment stg. Check that the secret is saved in stg in this repository and this run uses the latest workflow commit.')
+          path = Path(os.environ['RUNNER_TEMP']) / '.env.stg'
+          path.touch(mode=0o600)
+          path.chmod(0o600)
+          path.write_text(contents)
+          PYTHON
+          docker compose --env-file "$staging_file" config --quiet
+
   deploy:
-    needs: validate
+    needs: [validate, staging-config]
     permissions:
       contents: read
       id-token: write
