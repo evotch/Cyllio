@@ -1,10 +1,9 @@
-using MongoDB.Bson.Serialization.Attributes;
-
 namespace Cyllio.Common.Accounts;
 
 public sealed class Account
 {
-    [BsonId] public string Id { get; set; } = Guid.CreateVersion7().ToString();
+    public long Revision { get; set; }
+    public string Id { get; set; } = Guid.CreateVersion7().ToString();
     public string PhoneHash { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string? About { get; set; }
@@ -42,7 +41,8 @@ public sealed class AccountSession
 
 public sealed class VerificationChallenge
 {
-    [BsonId] public string Id { get; set; } = Guid.CreateVersion7().ToString();
+    public long Revision { get; set; }
+    public string Id { get; set; } = Guid.CreateVersion7().ToString();
     public string PhoneHash { get; set; } = "";
     public string CodeHash { get; set; } = "";
     public string? ProofHash { get; set; }

@@ -33,8 +33,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
-      Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
-      Mongo__Database: cyllio_accounts
+      DynamoDb__ServiceUrl: http://dynamodb:8000
+      DynamoDb__TableName: ${DYNAMODB_TABLE_NAME:-cyllio-local-entities}
       Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
       Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
       Auth__EnableDevelopmentOtp: ${AUTH_ENABLE_DEVELOPMENT_OTP:-true}
@@ -44,8 +44,8 @@ services:
       Auth__Sms__OriginationIdentities__US: ${AWS_SMS_US_ORIGINATION_IDENTITY:-}
       Auth__Sms__OriginationIdentities__BG: ${AWS_SMS_BG_ORIGINATION_IDENTITY:-}
     depends_on:
-      mongo:
-        condition: service_healthy
+      dynamodb:
+        condition: service_started
     image: cyllio-identity:local
     build:
       context: .
@@ -60,13 +60,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
-      Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
-      Mongo__Database: cyllio_accounts
+      DynamoDb__ServiceUrl: http://dynamodb:8000
+      DynamoDb__TableName: ${DYNAMODB_TABLE_NAME:-cyllio-local-entities}
       Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
       Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
     depends_on:
-      mongo:
-        condition: service_healthy
+      dynamodb:
+        condition: service_started
     image: cyllio-device:local
     build:
       context: .
@@ -219,26 +219,16 @@ services:
     volumes:
       - servicebus-sql-data:/var/opt/mssql
 
-  mongo:
-    image: mongo:8.0
+  dynamodb:
+    image: amazon/dynamodb-local:3.1.0
     restart: unless-stopped
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    user: root
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
     ports:
-      - "127.0.0.1:27018:27017"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      test:
-        - CMD
-        - mongosh
-        - --quiet
-        - --eval
-        - 'try { rs.status(); } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}); } if (!db.hello().isWritablePrimary) quit(1);'
-      interval: 5s
-      timeout: 10s
-      retries: 30
-      start_period: 10s
+      - dynamodb-data:/home/dynamodblocal/data
 
 volumes:
-  mongo-data:
+  dynamodb-data:
   servicebus-sql-data:

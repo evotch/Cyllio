@@ -30,4 +30,4 @@ docker build --build-arg SERVICE_PROJECT=Cyllio.Identity -t cyllio-identity:loca
 docker run --rm -p 8081:8080 cyllio-identity:local
 ```
 
-When application deployment is explicitly enabled, production runs two tasks per listed host. Compose includes MongoDB for account state and a Service Bus emulator for probes. Redis, object storage and LiveKit-compatible SFU integrations remain pending.
+When application deployment is explicitly enabled, production runs two tasks per listed host. Compose includes DynamoDB Local for account state and a Service Bus emulator for probes. Redis, object storage and LiveKit-compatible SFU integrations remain pending.

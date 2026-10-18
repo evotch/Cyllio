@@ -31,25 +31,25 @@ dotnet build Cyllio.sln -c Release
 dotnet run --project src/Cyllio.Api --urls http://localhost:8080
 ```
 
-The standalone `dotnet run` command starts the gateway only; account APIs need Identity, Device and MongoDB running with the configuration described in [implementation progress](docs/implementation.md).
+The standalone `dotnet run` command starts the gateway only; account APIs need Identity, Device and DynamoDB Local running with the configuration described in [implementation progress](docs/implementation.md).
 
-Endpoints: `/`, `/health/live`, `/health/ready`. Identity and Device readiness checks include MongoDB availability. Other hosts currently check process health only.
+Endpoints: `/`, `/health/live`, `/health/ready`. Identity and Device readiness checks include DynamoDB Local availability. Other hosts currently check process health only.
 
 ```sh
-docker compose up --build -d api identity device
-python3 scripts/test-accounts.py
+docker compose --env-file .env.local up --build -d api identity device
+COMPOSE_ENV_FILES=.env.local python3 scripts/test-accounts.py
 ```
 
 ## Run all services with Docker Compose
 
 With Docker running, configure the local Service Bus emulator before starting the stack. Use your private `.env.local` file with `docker compose --env-file .env.local`, set a strong `MSSQL_SA_PASSWORD` and independent `AUTH_SIGNING_KEY` / `AUTH_PHONE_HASH_KEY` secrets of at least 32 bytes, and set `ACCEPT_EULA=Y` after accepting the [Service Bus emulator license](https://github.com/Azure/azure-service-bus-emulator-installer/blob/main/EMULATOR_EULA.txt) and [SQL Server Linux license](https://go.microsoft.com/fwlink/?LinkId=746388). `.env` is ignored by Git and excluded from Docker builds.
 
-Start all eleven projects, MongoDB and the two emulator containers from the repository root:
+Start all eleven projects, DynamoDB Local and the two emulator containers from the repository root:
 
 ```sh
-docker compose up --build -d
-docker compose ps
-docker compose logs -f
+docker compose --env-file .env.local up --build -d
+docker compose --env-file .env.local ps
+docker compose --env-file .env.local logs -f
 ```
 
 Each service uses the shared Dockerfile with its own `SERVICE_PROJECT` build argument. Compose connects them on its default network; containers can reach each other at `http://<service-name>:8080`, for example `http://identity:8080`. Local ports bind to `127.0.0.1`.
@@ -78,10 +78,10 @@ curl --fail http://localhost:8081/health/ready
 Stop and remove the containers and network:
 
 ```sh
-docker compose down
+docker compose --env-file .env.local down
 ```
 
-To rebuild one service after editing its code, run `docker compose up --build -d identity` (replace `identity` with its Compose service name). If a local port is already in use, change that service's host port in `compose.yaml`.
+To rebuild one service after editing its code, run `docker compose --env-file .env.local up --build -d identity` (replace `identity` with its Compose service name). If a local port is already in use, change that service's host port in `compose.yaml`.
 
 ### Local Service Bus
 
@@ -93,7 +93,7 @@ The emulator configuration in `docker/servicebus/config.json` creates the `messa
 bash scripts/test-servicebus.sh
 # Or publish manually and inspect the consumers:
 curl --fail -X POST http://localhost:8083/dev/servicebus/probe
-docker compose logs notification realtime
+docker compose --env-file .env.local logs notification realtime
 ```
 
 The probe endpoint returns an event ID after Service Bus accepts the event. Both consumer logs should show that ID. It accepts no message content and is available only in Development with a configured broker. It does not persist a chat message or send a real push/SignalR event.
@@ -104,9 +104,9 @@ Emulator health: `http://localhost:5300/health`. AMQP: `localhost:5672`. Compose
 ServiceBus__ConnectionString='Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Cyllio.Messaging
 ```
 
-Without a connection string, these hosts continue to run with broker integration disabled. The AWS deployment provisions SNS/SQS, but the current Service Bus application adapter is still used only by the existing local stack. This emulator is for development, not production durability; do not rely on message retention across emulator restarts. SQL data uses a named volume, and `docker compose down` retains it.
+Without a connection string, these hosts continue to run with broker integration disabled. The AWS deployment provisions SNS/SQS, but the current Service Bus application adapter is still used only by the existing local stack. This emulator is for development, not production durability; do not rely on message retention across emulator restarts. SQL data uses a named volume, and `docker compose --env-file .env.local down` retains it.
 
-Identity and Device implement the initial authenticated account APIs. Message persistence, transactional outbox/inbox handling, business event handlers, push delivery and realtime hubs remain to be implemented. Run `python3 scripts/test-accounts.py` to verify the account slice; see [implementation progress](docs/implementation.md) for details. See [Microsoft's emulator documentation](https://learn.microsoft.com/en-us/azure/service-bus-messaging/test-locally-with-service-bus-emulator).
+Identity and Device implement the initial authenticated account APIs. Message persistence, transactional outbox/inbox handling, business event handlers, push delivery and realtime hubs remain to be implemented. Run `COMPOSE_ENV_FILES=.env.local python3 scripts/test-accounts.py` to verify the account slice; see [implementation progress](docs/implementation.md) for details. See [Microsoft's emulator documentation](https://learn.microsoft.com/en-us/azure/service-bus-messaging/test-locally-with-service-bus-emulator).
 
 ## AWS deployment
 

@@ -32,7 +32,7 @@ class DeploymentSelectionTests(unittest.TestCase):
             deployment.prepare({'services_enabled': {'value': True}},
                                'workflow_dispatch', False, 'secret-arn', '', 'commit')
 
-    def test_enabled_services_require_compatibility_secret(self):
+    def test_enabled_services_require_authentication_secret(self):
         with self.assertRaisesRegex(ValueError, 'ACCOUNT_SECRET_ARN'):
             deployment.prepare({'services_enabled': {'value': True}},
                                'push', False, '', '', 'commit')

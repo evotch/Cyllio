@@ -1,6 +1,6 @@
 # AWS deployment with Terraform
 
-The target is `messaging_backend_api_specification_v2.0_aws_native.docx`, especially sections 32–39. Terraform replaces Bicep for cloud infrastructure. The old templates are retained in `infra/legacy-azure` as historical reference; this change does not delete existing Azure resources. Local Compose and your private `.env.local`, `.env.stg`, `.env.prd` files remain unchanged.
+The target is `messaging_backend_api_specification_v2.0_aws_native.docx`, especially sections 32–39. Terraform replaces Bicep for cloud infrastructure. The old templates are retained in `infra/legacy-azure` as historical reference; this change does not delete existing Azure resources. Local Compose uses DynamoDB Local; private env files supply authentication and SMS settings.
 
 ## What is provisioned
 
@@ -16,25 +16,25 @@ The public API URL is an AWS-provided HTTPS endpoint, so an initial deploy does 
 
 ## Application migration boundary
 
-**Infrastructure creation does not migrate the .NET implementation to AWS APIs.** The current account code still needs MongoDB, the broker adapter still uses Service Bus, and OTP now uses AWS End User Messaging SMS with approved country-specific origination identities. The new DynamoDB/SNS/SQS resources are not consumed by current application code. DynamoDB repositories, transactional outbox/consumers, WebSocket ticket authorization, push and calling still need application implementations before the v2 platform is operational.
+Identity and Device use the Terraform-managed DynamoDB entity table for accounts, devices, sessions and OTP challenges. Reads use strongly consistent primary keys. Transactions enforce unique phone ownership, proof consumption and account revision checks. Expiration is checked by the application; asynchronous TTL cleanup is not an authorization mechanism. Local Compose runs DynamoDB Local with the same PK/SK schema.
 
-`enable_services=false` is the default. It creates the foundation without starting applications that cannot yet use DynamoDB. The API returns no healthy application response until containers are deployed. To run the current account slice temporarily on AWS:
+`enable_services=false` creates the foundation without starting applications. To deploy the account slice:
 
-1. Provide a reachable transaction-capable MongoDB replica set (not provisioned here). Allow connectivity from the private tasks/NAT addresses as appropriate.
-2. Create a Secrets Manager secret outside Terraform with this JSON structure. Use independent random keys of at least 32 bytes and keep the phone-hash key stable:
+1. Create a Secrets Manager secret outside Terraform containing independent signing and phone-hash keys of at least 32 bytes. Keep the phone-hash key stable:
 
    ```json
    {
-     "mongoConnectionString": "mongodb+srv://...",
      "authSigningKey": "<independent random secret>",
      "authPhoneHashKey": "<independent stable random secret>"
    }
    ```
 
-3. Set `account_secret_arn` to its ARN. Supply `account_secret_kms_key_arn` if the secret uses a customer-managed key. Only Identity and Device execution roles may retrieve it. Values are injected directly by ECS; Terraform manages no secret versions and does not read secret values into state.
-4. Push all images with an immutable tag, then enable services with that tag. Production runs two tasks per host; staging runs one. Rollback is enabled on failed ECS deployments. Other hosts remain feature scaffolds, and the AWS deployment does not inject ACS credentials or enable development OTP. Verification start returns 503 until at least one approved short-code/pool ARN is configured; unsupported destination countries return 400.
+2. Set `account_secret_arn` to its ARN, plus `account_secret_kms_key_arn` if it uses a customer-managed key. Only Identity and Device execution roles retrieve it. ECS injects values directly; Terraform does not store secret values in state.
+3. Push images with an immutable tag, then enable services. Production runs two tasks per host; staging runs one. ECS rolls back failed deployments. Verification returns 503 until approved SMS identities are configured.
 
-Task roles have no general data-plane AWS access. Identity receives only scoped SMS send access when approved sender ARNs are configured; add DynamoDB, SNS/SQS, media and Chime permissions alongside their future adapters. ECS execution roles only pull images, write logs and fetch their permitted account secret.
+Identity and Device task roles receive read/write/transaction item permissions limited to their environment's entity table, plus scoped DynamoDB KMS access. They cannot create or scan tables. Local endpoint configuration uses dummy credentials scoped to the database client; AWS uses task-role credentials and Terraform creates the table.
+
+The broker adapter still uses Service Bus. SNS/SQS consumers/outbox, WebSocket authorization, push and calling remain application work. Existing MongoDB data is not automatically copied; preserve the old database and plan a data import before switching any environment that contains real accounts. Local testing starts with a fresh DynamoDB volume; the old MongoDB volume is left intact.
 
 ## Bootstrap remote state
 
@@ -74,7 +74,7 @@ TF_DATA_DIR="$PWD/.terraform-stg" terraform -chdir=infra/aws apply stg.tfplan
 
 For production, use `prd` consistently in the backend filename, state key, data directory, variable file and plan filename. Private `*.tfvars`, backend files, state and saved plans are Git-ignored; the two checked-in environment variable files contain no secrets. Commit provider lock files. The S3 backend uses native S3 lockfiles (`use_lockfile=true`).
 
-To deploy compatibility containers manually after the foundation and images exist:
+To deploy application containers manually after the foundation and images exist:
 
 ```sh
 TF_DATA_DIR="$PWD/.terraform-stg" terraform -chdir=infra/aws plan \
@@ -97,16 +97,16 @@ Set these GitHub **environment variables** for each environment (ARNs are refere
 | `AWS_REGION` | Deployment/state region |
 | `AWS_ROLE_ARN` | Environment-specific OIDC deployment role |
 | `TF_STATE_BUCKET` | Matching environment bucket from bootstrap `state_buckets` output |
-| `ACCOUNT_SECRET_ARN` | Optional compatibility secret; required when deploying current containers |
+| `ACCOUNT_SECRET_ARN` | Account authentication secret; required when deploying containers |
 | `ACCOUNT_SECRET_KMS_KEY_ARN` | Optional customer-managed key protecting that secret |
 
 **Every push or merge to `main` runs Deploy AWS and automatically applies staging Terraform only after the full CI workflow succeeds: .NET build/formatting, OTP tests, Terraform validation/tests, container smoke tests and account integration. The legacy Service Bus integration job has been removed; AWS SNS/SQS application integration coverage is pending the AWS broker adapter.** CI is reused as a required job in Deploy AWS, so a failed or cancelled CI job prevents deployment of that commit. Pull requests run CI without deployment. Manual deployments also run full CI first. Push runs use the `stg` GitHub environment and `stg/terraform.tfstate`; production remains a manual deployment. The environment-specific bootstrap state bucket and OIDC deployment role must already exist.
 
 On the first main push, application services remain disabled and the pipeline creates the foundation/ECR repositories. If staging services are already enabled, later main pushes keep them enabled and build/push the new commit images before applying Terraform; `ACCOUNT_SECRET_ARN` must remain configured.
 
-You can also run **Deploy AWS** manually with `stg` or `prd`; manual runs default to **plan**. Apply with `deploy_services=false` to create the foundation/ECR repositories. After configuring the compatibility secret, apply again with `deploy_services=true` to build/push all images and start the containers. Building uses `linux/amd64` to match Fargate task architecture. The selected commit SHA is an immutable image tag; an existing tag is reused on retries. ECS must become stable and the HTTPS readiness check must pass. A services plan can be reviewed before image publication, but its apply run rebuilds the plan after publishing images.
+You can also run **Deploy AWS** manually with `stg` or `prd`; manual runs default to **plan**. Apply with `deploy_services=false` to create the foundation/ECR repositories. After configuring the account authentication secret, apply again with `deploy_services=true` to build/push all images and start the containers. Building uses `linux/amd64` to match Fargate task architecture. The selected commit SHA is an immutable image tag; an existing tag is reused on retries. ECS must become stable and the HTTPS readiness check must pass. A services plan can be reviewed before image publication, but its apply run rebuilds the plan after publishing images.
 
-A local commit does not run a deployment; pushing or merging it to `main` triggers the staging deployment. No data migration is performed. Existing MongoDB, Service Bus emulator, iPhone configuration and Azure resources remain unchanged. The Identity SMS adapter now uses AWS; old ACS env entries are no longer consumed by Compose.
+A local commit does not run a deployment; pushing or merging it to `main` triggers the staging deployment. No data migration is performed. Existing MongoDB data is not imported or deleted. Service Bus probes remain separate. The Identity SMS adapter now uses AWS; old ACS env entries are no longer consumed by Compose.
 
 ## Validation
 
@@ -119,7 +119,7 @@ terraform -chdir=infra/bootstrap init
 terraform -chdir=infra/bootstrap validate
 ```
 
-Mock-provider tests cover staging/production network topology, private compute/media, repository counts, data protection, queue/DLQ fanout and the compatibility-secret gate. They make no AWS API calls. They do not replace a real account-specific plan, regional availability checks or application integration tests. Deployment-selection tests run with `python3 -m unittest discover -s tests/pipeline -v`.
+Mock-provider tests cover staging/production network topology, private compute/media, repository counts, data protection, queue/DLQ fanout and the authentication-secret gate. They make no AWS API calls. They do not replace a real account-specific plan, regional availability checks or application integration tests. Deployment-selection tests run with `python3 -m unittest discover -s tests/pipeline -v`.
 
 References: [AWS ECS private service integration](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-private.html), [Terraform S3 state/locking](https://developer.hashicorp.com/terraform/language/backend/s3).
 
@@ -151,7 +151,7 @@ Newer GitHub repositories include immutable owner/repository IDs in the OIDC sub
 
 ## AWS OTP SMS and dedicated short codes (US and Bulgaria)
 
-Terraform creates a transactional SMS configuration set (`cyllio-stg-otp` / `cyllio-prd-otp`), delivery-event CloudWatch log group, an SMS service role permitted to write only those logs, and an Identity task send policy limited to the provided origination identities/configuration set. Delivery-event logs can contain destination phone numbers; retention follows `log_retention_days` and access should remain restricted. The SDK adapter does not log OTP codes, message bodies or provider exception text. Automatic SDK retries are disabled after ambiguous send failures, and message TTL never exceeds the OTP's remaining lifetime. Real OTP verification still happens in Identity/MongoDB; AWS transports the SMS.
+Terraform creates a transactional SMS configuration set (`cyllio-stg-otp` / `cyllio-prd-otp`), delivery-event CloudWatch log group, an SMS service role permitted to write only those logs, and an Identity task send policy limited to the provided origination identities/configuration set. Delivery-event logs can contain destination phone numbers; retention follows `log_retention_days` and access should remain restricted. The SDK adapter does not log OTP codes, message bodies or provider exception text. Automatic SDK retries are disabled after ambiguous send failures, and message TTL never exceeds the OTP's remaining lifetime. Real OTP verification still happens in Identity/DynamoDB; AWS transports the SMS.
 
 Short codes are registered national sending numbers, usually five or six digits. Request separate dedicated short codes for the US and Bulgaria through AWS Support, including carrier registrations and any required opt-in evidence. Terraform cannot manufacture an approved short code by setting a five-digit sender string. It deliberately does not reserve a substitute paid number or silently send with an alphanumeric sender ID. See [AWS short-code requests](https://docs.aws.amazon.com/sms-voice/latest/userguide/phone-numbers-request-short-code.html) and the prepared [request checklist](sms-short-code-requests.md).
 
@@ -168,4 +168,4 @@ Terraform injects these ARNs, region and configuration-set name into Identity; o
 
 A foundation-only deployment creates configuration/logging but grants no send permission while the identity map is empty. SMS account production access, spending quotas, sandbox destination verification and short-code carrier approvals are account/telecom setup steps; Terraform does not bypass them. Tests use fake AWS clients/mock providers and never send or purchase SMS. Run `dotnet run --project tests/Cyllio.Otp.Tests` and `terraform -chdir=infra/aws test` to verify the adapter and wiring.
 
-For push/manual deployment runs, a dedicated job in `deploy.yml` bound directly to environment `stg` validates the actual staging Compose configuration from the `STAGING_ENV_FILE` secret in GitHub environment `stg`. Set that secret to the contents of your private `.env.stg`; the job writes it to an owner-only temporary file, runs `docker compose --env-file ... config --quiet`, and deletes the file. It never commits, prints or uploads the env file and starts no services. Pull-request runs skip this secret-backed job. Deployments wait for it together with the other CI jobs. The private `.env.stg` stays Git-ignored.
+For push/manual deployment runs, the `environment-config` job in `deploy.yml` validates the actual Compose configuration for the selected GitHub environment. Staging uses environment `stg` and secret `STAGING_ENV_FILE` containing your private `.env.stg`; production uses environment `prd` and secret `PRODUCTION_ENV_FILE` containing your private `.env.prd`. The job writes an owner-only temporary file, runs `docker compose --env-file ... config --quiet`, and deletes it without printing or uploading its contents or starting services. A missing production secret fails validation without falling back to staging. Deployment waits for this check and full CI. Pushes to `main` deploy staging; production uses **Run workflow → environment: prd → operation: apply**. Private env files stay Git-ignored.

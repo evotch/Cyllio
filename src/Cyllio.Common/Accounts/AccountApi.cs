@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using MongoDB.Driver;
+using AmazonServiceException = Amazon.Runtime.AmazonServiceException;
 
 namespace Cyllio.Common.Accounts;
 
@@ -41,7 +41,7 @@ public static class AccountApi
                     var userId = context.Principal?.FindFirstValue("sub");
                     var deviceId = context.Principal?.FindFirstValue("deviceId");
                     var sessionId = context.Principal?.FindFirstValue("sessionId");
-                    var account = await database.Accounts.Find(x => x.Id == userId).FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+                    var account = await database.GetAccountAsync(userId, context.HttpContext.RequestAborted);
                     if (account is null || account.SecurityVersion.ToString() != context.Principal?.FindFirstValue("securityVersion") ||
                         !account.Devices.Any(x => x.Id == deviceId && x.RevokedAt == null) ||
                         !account.Sessions.Any(x => x.Id == sessionId && x.DeviceId == deviceId && x.RevokedAt == null && x.ExpiresAt > DateTime.UtcNow))
@@ -50,7 +50,7 @@ public static class AccountApi
             };
         });
         builder.Services.AddAuthorization();
-        builder.Services.AddHealthChecks().AddCheck<AccountDatabaseHealthCheck>("mongo", tags: ["ready"]);
+        builder.Services.AddHealthChecks().AddCheck<AccountDatabaseHealthCheck>("dynamodb", tags: ["ready"]);
         builder.Services.AddExceptionHandler<DatabaseExceptionHandler>();
     }
 
@@ -65,7 +65,7 @@ internal sealed class DatabaseExceptionHandler : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken)
     {
-        if (exception is not MongoException and not TimeoutException) return false;
+        if (exception is not AmazonServiceException and not TimeoutException) return false;
         context.Response.StatusCode = 503;
         await Results.Problem(statusCode: 503, title: "Account database unavailable").ExecuteAsync(context);
         return true;

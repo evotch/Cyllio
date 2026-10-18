@@ -99,6 +99,8 @@ resource "aws_ecs_task_definition" "service" {
       ], each.key == "api" ? [
       { name = "Services__Identity", value = "http://identity.${local.namespace}:8080/" },
       { name = "Services__Device", value = "http://device.${local.namespace}:8080/" }
+      ] : [], contains(local.account_services, each.key) ? [
+      { name = "DynamoDb__TableName", value = aws_dynamodb_table.main.name }
       ] : [], each.key == "identity" && var.enable_sms ? concat([
         { name = "Auth__Sms__Enabled", value = "true" },
         { name = "Auth__Sms__Region", value = var.aws_region },
@@ -118,7 +120,7 @@ resource "aws_ecs_task_definition" "service" {
     }
     precondition {
       condition     = var.account_secret_arn != null
-      error_message = "Current account services still need the MongoDB compatibility secret. DynamoDB application migration is pending."
+      error_message = "Account services require a Secrets Manager secret containing authSigningKey and authPhoneHashKey."
     }
   }
 }
@@ -152,5 +154,14 @@ resource "aws_ecs_service" "service" {
       container_port   = 8080
     }
   }
-  depends_on = [aws_lb_listener.api, aws_iam_role_policy_attachment.execution, aws_iam_role_policy.account_secrets, aws_iam_role_policy.identity_sms, aws_pinpointsmsvoicev2_event_destination.otp, aws_route_table_association.private]
+  depends_on = [aws_lb_listener.api, aws_iam_role_policy_attachment.execution, aws_iam_role_policy.account_secrets, aws_iam_role_policy.identity_sms, aws_iam_role_policy.account_database, aws_pinpointsmsvoicev2_event_destination.otp, aws_route_table_association.private]
+}
+
+resource "aws_iam_role_policy" "account_database" {
+  for_each = local.account_services
+  role     = aws_iam_role.task[each.key].id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Effect = "Allow", Action = ["dynamodb:DescribeTable", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:ConditionCheckItem"], Resource = aws_dynamodb_table.main.arn },
+    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.data.arn, Condition = { StringEquals = { "kms:ViaService" = "dynamodb.${var.aws_region}.amazonaws.com" } } }
+  ] })
 }

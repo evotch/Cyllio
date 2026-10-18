@@ -65,7 +65,7 @@ run "production_foundation" {
     error_message = "Production must protect durable state and use an independent NAT gateway in each AZ."
   }
 }
-run "compatibility_services" {
+run "account_services" {
   command = plan
   variables {
     environment        = "prd"
@@ -92,7 +92,7 @@ run "compatibility_services" {
     error_message = "Only Identity and Device execution roles may fetch account secrets."
   }
 }
-run "missing_compatibility_secret" {
+run "missing_authentication_secret" {
   command = plan
   variables {
     environment     = "stg"
@@ -164,5 +164,49 @@ run "sms_disabled" {
   assert {
     condition     = length(aws_pinpointsmsvoicev2_configuration_set.otp) == 0 && length(aws_iam_role_policy.identity_sms) == 0
     error_message = "Explicitly disabling SMS must remove its configuration and send permissions."
+  }
+}
+
+run "dynamodb_account_wiring" {
+  command = plan
+  variables {
+    environment        = "stg"
+    enable_services    = true
+    image_tag          = "0123456789abcdef"
+    account_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:accounts-abcdef"
+  }
+  override_resource {
+    target          = aws_dynamodb_table.main
+    override_during = plan
+    values          = { arn = "arn:aws:dynamodb:us-east-1:123456789012:table/cyllio-stg-entities" }
+  }
+  override_resource {
+    target          = aws_kms_key.data
+    override_during = plan
+    values          = { arn = "arn:aws:kms:us-east-1:123456789012:key/test" }
+  }
+  override_resource {
+    target          = aws_ecr_repository.service["identity"]
+    override_during = plan
+    values          = { repository_url = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cyllio-stg/cyllio-identity" }
+  }
+  assert {
+    condition = length(aws_iam_role_policy.account_database) == 2 && alltrue([
+      for policy in aws_iam_role_policy.account_database :
+      jsondecode(policy.policy).Statement[0].Resource == "arn:aws:dynamodb:us-east-1:123456789012:table/cyllio-stg-entities" &&
+      contains(jsondecode(policy.policy).Statement[0].Action, "dynamodb:ConditionCheckItem") &&
+      !contains(jsondecode(policy.policy).Statement[0].Action, "dynamodb:Scan")
+    ])
+    error_message = "Only account task roles should receive item access scoped to the environment table."
+  }
+  assert {
+    condition = contains(
+      [for entry in jsondecode(aws_ecs_task_definition.service["identity"].container_definitions)[0].environment : "${entry.name}=${entry.value}"],
+      "DynamoDb__TableName=cyllio-stg-entities"
+      ) && alltrue([
+        for secret in jsondecode(aws_ecs_task_definition.service["identity"].container_definitions)[0].secrets :
+        contains(["Auth__SigningKey", "Auth__PhoneHashKey"], secret.name)
+    ])
+    error_message = "Account containers must use DynamoDB and receive only authentication secrets."
   }
 }

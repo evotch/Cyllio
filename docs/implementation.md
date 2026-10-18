@@ -10,7 +10,7 @@ Source: `messaging_backend_api_specification_v1.3_privacy_preferences.docx`, ver
 | Profile (section 3) | Read and update the caller's own display name, about and avatar reference; ETag/If-Match concurrency. |
 | Devices (sections 4, 29) | List the caller's active devices; update the current device's push capability; revoke an owned device and its sessions immediately. Separate accounts on a shared installation remain isolated. |
 | Privacy (section 31) | Persist all account preference fields from section 31 with value validation and ETag/If-Match concurrency. This stores policy; communication enforcement awaits the corresponding APIs. |
-| Persistence (section 19) | MongoDB single-node development replica set, unique phone lookup index, expiring verification documents and transactions for proof consumption, registration and refresh. |
+| Persistence (section 19) | DynamoDB Local in development and the AWS DynamoDB entity table in staging/production; consistent key lookups, unique phone reservations, TTL and conditional transactions for proof consumption, registration and refresh. |
 | API entry | YARP routes auth/profile/privacy to Identity and device APIs to Device. Every backend performs JWT and live account/session/device validation. Development OTP endpoints are not forwarded. |
 
 Endpoints:
@@ -38,14 +38,14 @@ Public keys and signature lengths are checked, but cryptographic signature verif
 
 ## Run and verify
 
-Set independent `AUTH_SIGNING_KEY` and `AUTH_PHONE_HASH_KEY` secrets (at least 32 bytes each) in `.env`; generate each with `openssl rand -hex 48`. Existing local `.env` files from earlier setup need these new entries. Both Identity and Device use them. Keep the phone lookup secret stable; changing it requires a planned lookup migration. The local setup stores HMAC phone lookup hashes, not raw phone numbers.
+Set independent `AUTH_SIGNING_KEY` and `AUTH_PHONE_HASH_KEY` secrets (at least 32 bytes each) in `.env.local`; generate each with `openssl rand -hex 48`. Existing local `.env` files from earlier setup need these new entries. Both Identity and Device use them. Keep the phone lookup secret stable; changing it requires a planned lookup migration. The local setup stores HMAC phone lookup hashes, not raw phone numbers.
 
 ```sh
-docker compose up --build -d api identity device
-python3 scripts/test-accounts.py
+docker compose --env-file .env.local up --build -d api identity device
+COMPOSE_ENV_FILES=.env.local python3 scripts/test-accounts.py
 ```
 
-MongoDB is exposed on `127.0.0.1:27018` with a persistent `mongo-data` volume. It is an unauthenticated, single-node replica set for local development only. For direct local .NET execution use `Mongo__ConnectionString='mongodb://localhost:27018/?replicaSet=rs0&directConnection=true'`, the two `Auth__...` secrets and `ASPNETCORE_ENVIRONMENT=Development`. Identity also requires `Auth__EnableDevelopmentOtp=true` to use the test OTP provider.
+DynamoDB Local is exposed on `127.0.0.1:8000` with a persistent `dynamodb-data` volume. Identity and Device create the local table automatically, tolerating concurrent startup. For direct local .NET execution set `DynamoDb__ServiceUrl=http://localhost:8000`, `DynamoDb__TableName=cyllio-local-entities`, both `Auth__...` secrets and `ASPNETCORE_ENVIRONMENT=Development`. Identity also needs `Auth__EnableDevelopmentOtp=true` for test OTPs. Compose sets the database endpoint and table automatically; `DYNAMODB_TABLE_NAME` can override the local table name. Local database credentials are dummy values used only inside the database client, not SMS credentials. Existing MongoDB volumes are preserved but their data is not imported.
 
 A local verification example:
 
@@ -57,15 +57,17 @@ curl -X POST http://localhost:8080/api/v1/auth/verification/start \
 curl http://localhost:8081/dev/otp/<verificationId>
 ```
 
-Confirmation returns a registration token, not an account token. Verification expires after five minutes, accepts at most five attempts, and has a per-phone cooldown plus per-process IP throttling. Codes are never logged or stored as plaintext in MongoDB. The development provider stores codes in expiring process memory and is exposed only when both Development and the explicit setting are enabled. Real SMS uses AWS End User Messaging SMS with region, configuration set and approved `Auth:Sms:OriginationIdentities:US` / `:BG` ARNs. Without a configured identity, production verification start returns 503. Voice delivery is not implemented. AWS SMS configuration, including partial configuration, disables development OTP retrieval. See [deployment setup](deployment.md#aws-otp-sms-and-dedicated-short-codes-us-and-bulgaria).
+Confirmation returns a registration token, not an account token. Verification expires after five minutes, accepts at most five attempts, and has a per-phone cooldown plus per-process IP throttling. Codes are never logged or stored as plaintext in DynamoDB. The development provider stores codes in expiring process memory and is exposed only when both Development and the explicit setting are enabled. Real SMS uses AWS End User Messaging SMS with region, configuration set and approved `Auth:Sms:OriginationIdentities:US` / `:BG` ARNs. Without a configured identity, production verification start returns 503. Voice delivery is not implemented. AWS SMS configuration, including partial configuration, disables development OTP retrieval. See [deployment setup](deployment.md#aws-otp-sms-and-dedicated-short-codes-us-and-bulgaria).
 
 GET profile/privacy responses include `ETag`. Supply that value in `If-Match` when updating. Missing versions return 428; stale versions return 412. Ownership always comes from the signed token, never a body-supplied user or installation ID. Device lists omit public keys, push tokens and refresh-token hashes.
 
-The integration script verifies registration proof replay protection, unauthorized requests, two accounts on one installation, cross-account device mutation denial, privacy and profile isolation, stale/concurrent version rejection, single-use refresh rotation, login proof isolation, persistence across service restarts, logout-all and immediate device revocation. It restarts Identity and Device to check persistence and creates test accounts in the local database and does not remove the database or its volume. CI runs the same script.
+The integration script verifies registration proof replay protection, unauthorized requests, two accounts on one installation, cross-account device mutation denial, privacy and profile isolation, stale/concurrent version rejection, single-use refresh rotation, login proof isolation, persistence across service restarts, logout-all and immediate device revocation. It restarts DynamoDB Local, Identity and Device to check disk persistence and creates test accounts in the local database and does not remove the database or its volume. CI runs the same script.
 
 ## Persistence boundary
 
 For this first slice Identity and Device share the account database and one account aggregate with embedded device and session metadata. Public cryptographic prekey inventory is not implemented here. Keeping lifecycle state together provides atomic session revocation and refresh behavior; this is an initial implementation choice, not a final separate-database-per-service design. Login prunes expired/revoked sessions and bounds the account to 100 active sessions; trusted-device linking is follow-up work.
+
+DynamoDB uses `PK` plus constant `SK=DATA`. Account aggregates use `ACCOUNT#<id>`; unique `PHONE#<hash>` reservations map to accounts. `REFRESH#<hash>` and `PROOF#<hash>` lookups map to accounts/challenges without scans or eventually consistent indexes. `CHALLENGE#<id>` stores hashed verification state, and `COOLDOWN#<phone-hash>` serializes sends across service instances. JSON payloads and numeric revisions are committed together. Challenge/proof/refresh/cooldown items carry Unix-second `expiresAt` TTL values; account state remains durable. Stale refresh lookups cannot authorize a request because the current account session is always checked. Existing MongoDB records are not imported automatically.
 
 The existing Service Bus probe remains separate. Registration/device mutations are not yet published as business events. A transactional outbox must be introduced before downstream services depend on their lifecycle events.
 
@@ -81,14 +83,12 @@ The existing Service Bus probe remains separate. Registration/device mutations a
 8. Call state, signaling, LiveKit/SFU access and call policy.
 9. Abuse/report administration, audit events, observability and the complete security test matrix.
 
-## Azure prerequisites
+## AWS prerequisites
 
-Identity and Device now require a reachable transaction-capable MongoDB replica set and signing/phone-hash secrets. AWS Terraform can inject these from an existing Secrets Manager JSON secret referenced by `ACCOUNT_SECRET_ARN`; Terraform does not read or store the secret values. MongoDB must be provisioned separately. Local MongoDB and the test OTP provider are not production infrastructure. Signing-secret distribution is a first-slice choice; asymmetric signing with verification keys and managed secret storage is follow-up work.
-
-References: [Minimal API authentication](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/security?view=aspnetcore-10.0), [MongoDB transactions](https://www.mongodb.com/docs/manual/core/transactions/), [YARP configuration](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/yarp/config-files?view=aspnetcore-10.0).
+Identity and Device require the environment's DynamoDB table plus signing/phone-hash secrets. Terraform injects the table name and grants scoped task-role access. `ACCOUNT_SECRET_ARN` references a Secrets Manager JSON object containing only `authSigningKey` and `authPhoneHashKey`; values do not enter Terraform state. Table creation on startup is limited to an explicitly configured local endpoint. AWS tables are created by Terraform.
 
 ## AWS v2 infrastructure migration
 
 The active cloud deployment uses `infra/aws` Terraform and GitHub **Deploy AWS**, with independent `stg` and `prd` state. The previous Azure Bicep templates are archived under `infra/legacy-azure` and no longer run in CI/deploy. Terraform provisions the AWS foundation described in [deployment setup](deployment.md).
 
-This changes infrastructure, not application persistence or provider adapters. The current .NET account implementation still uses MongoDB, event probes use Azure Service Bus, and OTP uses AWS End User Messaging SMS (or the local development provider). DynamoDB repositories, SNS/SQS consumers/outbox, authenticated API Gateway WebSocket handlers, CloudFront authorization and Chime SDK are pending application work. Application deployment defaults off; optionally run the current account slice using the documented MongoDB compatibility secret. Identity now receives country-specific AWS SMS identities and uses its task role for sending. Real delivery still requires approved US/Bulgarian short codes and SMS account access; local development codes remain available when AWS SMS is unset.
+Account persistence and OTP transport now use DynamoDB and AWS End User Messaging SMS respectively. Event probes still use Azure Service Bus. SNS/SQS consumers/outbox, authenticated WebSocket handlers, CloudFront authorization and Chime SDK remain pending. Application deployment defaults off; enable it after configuring the authentication secret and images. Approved US/Bulgarian short codes and SMS account access are required for real delivery. Local development codes remain available when AWS SMS is unset.

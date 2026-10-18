@@ -3,6 +3,7 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import http.client
 import secrets
 import subprocess
@@ -10,8 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-API = 'http://localhost:8080'
-IDENTITY = 'http://localhost:8081'
+API = os.environ.get('TEST_API_URL', 'http://localhost:8080')
+IDENTITY = os.environ.get('TEST_IDENTITY_URL', 'http://localhost:8081')
 
 
 def call(method, path, body=None, token=None, etag=None, base=API):
@@ -44,7 +45,10 @@ def verification(phone, installation):
     request = {'verificationId': started['verificationId'], 'code': code,
                'device': {'installationId': installation, 'platform': 'ios', 'appVersion': '1.0'}}
     expect(401, call('POST', '/api/v1/auth/verification/confirm', {**request, 'code': '000000'}))
-    confirmed = expect(200, call('POST', '/api/v1/auth/verification/confirm', request))[1]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        confirmations = list(pool.map(lambda _: call('POST', '/api/v1/auth/verification/confirm', request), range(2)))
+    assert sorted(result[0] for result in confirmations) == [200, 401], 'A challenge may be confirmed once'
+    confirmed = next(result[1] for result in confirmations if result[0] == 200)
     expect(401, call('POST', '/api/v1/auth/verification/confirm', request))
     return confirmed['registrationToken']
 
@@ -57,7 +61,11 @@ def register(phone, installation):
             'identityKey': base64.b64encode(secrets.token_bytes(32)).decode(),
             'signedPreKey': {'keyId': 1, 'publicKey': base64.b64encode(secrets.token_bytes(32)).decode(),
                              'signature': base64.b64encode(secrets.token_bytes(64)).decode()}}
-    account = expect(201, call('POST', '/api/v1/auth/register', body, proof))[1]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        registrations = list(pool.map(lambda _: call('POST', '/api/v1/auth/register', body, proof), range(2)))
+    assert sum(result[0] == 201 for result in registrations) == 1, 'A proof may create only one account'
+    assert all(result[0] in (201, 401, 409) for result in registrations)
+    account = next(result[1] for result in registrations if result[0] == 201)
     expect(401, call('POST', '/api/v1/auth/register', body, proof))
     return account
 
@@ -128,7 +136,7 @@ def main():
     login = expect(200, call('POST', '/api/v1/auth/login', {'deviceId': a['deviceId']}, proof))[1]
     expect(401, call('POST', '/api/v1/auth/login', {'deviceId': a['deviceId']}, proof))
     expect(200, call('GET', '/api/v1/users/me', token=login['accessToken']))
-    subprocess.run(['docker', 'compose', 'restart', 'identity', 'device'], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(['docker', 'compose', 'restart', 'dynamodb', 'identity', 'device'], check=True, stdout=subprocess.DEVNULL)
     for attempt in range(60):
         try:
             if call('GET', '/health/ready')[0] == 200:
@@ -137,14 +145,28 @@ def main():
             pass
         time.sleep(1)
     else:
-        raise AssertionError('Account services did not recover after restart')
+        raise AssertionError('Account services did not recover after database/service restart')
     persisted = expect(200, call('GET', '/api/v1/users/me', token=login['accessToken']))[1]
-    assert persisted['displayName'] == 'Updated', 'Profile and sessions must survive process restart'
+    assert persisted['displayName'] == 'Updated', 'Profile and sessions must survive database and service restart'
     assert expect(200, call('GET', '/api/v1/privacy/settings', token=login['accessToken']))[1]['messages']['from'] == 'nobody'
     expect(204, call('POST', '/api/v1/auth/logout-all', token=login['accessToken']))
     expect(401, call('GET', '/api/v1/users/me', token=login['accessToken']))
     expect(401, call('POST', '/api/v1/auth/refresh', {'refreshToken': login['refreshToken']}))
-    print('Account integration passed: OTP replay, registration, account isolation, privacy/profile concurrency, refresh rotation, login proof isolation, restart persistence, logout-all and device revocation.')
+    # After service restart the IP limiter has a fresh window. Concurrent requests
+    # for the same phone must reserve one cooldown slot, including across time buckets.
+    phone_c = '+1777' + str(secrets.randbelow(10_000_000)).zfill(7)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        starts = list(pool.map(lambda _: call('POST', '/api/v1/auth/verification/start', {'phoneNumber': phone_c}), range(2)))
+    assert sorted(result[0] for result in starts) == [202, 429], 'Only one concurrent SMS challenge may start'
+    challenge_id = next(result[1]['verificationId'] for result in starts if result[0] == 202)
+    code = expect(200, call('GET', '/dev/otp/' + challenge_id, base=IDENTITY))[1]['code']
+    confirmation = {'verificationId': challenge_id, 'code': '000000',
+                    'device': {'installationId': installation, 'platform': 'ios'}}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        failures = list(pool.map(lambda _: call('POST', '/api/v1/auth/verification/confirm', confirmation), range(6)))
+    assert all(result[0] == 401 for result in failures)
+    expect(401, call('POST', '/api/v1/auth/verification/confirm', {**confirmation, 'code': code}))
+    print('Account integration passed: concurrent OTP cooldown/confirmation/attempt limits, registration proof replay, account isolation, privacy/profile concurrency, refresh rotation, login proof isolation, restart persistence, logout-all and device revocation.')
 
 
 if __name__ == '__main__':

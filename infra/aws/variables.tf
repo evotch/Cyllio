@@ -22,7 +22,7 @@ variable "vpc_cidr" {
   default = "10.40.0.0/16"
 }
 variable "enable_services" {
-  description = "Start current application containers only after images and compatibility secrets are available. AWS-native adapters are separate application work."
+  description = "Start application containers after images and account authentication secrets are available."
   type        = bool
   default     = false
 }
@@ -32,7 +32,7 @@ variable "image_tag" {
   default     = ""
 }
 variable "account_secret_arn" {
-  description = "Existing Secrets Manager JSON secret for the current MongoDB-based account implementation; values never enter Terraform. Keys: mongoConnectionString, authSigningKey, authPhoneHashKey."
+  description = "Existing Secrets Manager JSON secret for account authentication; values never enter Terraform. Keys: authSigningKey, authPhoneHashKey."
   type        = string
   default     = null
   nullable    = true
@@ -42,7 +42,7 @@ variable "account_secret_arn" {
   }
 }
 variable "account_secret_kms_key_arn" {
-  description = "Customer-managed KMS key ARN for the compatibility secret, if applicable."
+  description = "Customer-managed KMS key ARN for the account authentication secret, if applicable."
   type        = string
   default     = null
 }

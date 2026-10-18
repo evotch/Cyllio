@@ -12,7 +12,7 @@ def prepare(outputs, event, requested_services, account_secret_arn, kms_key_arn,
     if deployed and not enabled:
         raise ValueError('Services are already deployed. Select deploy_services to preserve them.')
     if enabled and not account_secret_arn:
-        raise ValueError('Set ACCOUNT_SECRET_ARN for the existing MongoDB account implementation')
+        raise ValueError('Set ACCOUNT_SECRET_ARN for account signing and phone-hash keys')
     return {
         'enable_services': enabled,
         'image_tag': sha if enabled else '',

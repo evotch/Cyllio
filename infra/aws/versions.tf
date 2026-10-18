@@ -33,7 +33,6 @@ locals {
   consumers        = toset(["notification", "realtime", "trust-safety"])
   namespace        = "${local.prefix}.internal"
   account_secrets = var.account_secret_arn == null ? [] : [
-    { name = "Mongo__ConnectionString", valueFrom = "${var.account_secret_arn}:mongoConnectionString::" },
     { name = "Auth__SigningKey", valueFrom = "${var.account_secret_arn}:authSigningKey::" },
     { name = "Auth__PhoneHashKey", valueFrom = "${var.account_secret_arn}:authPhoneHashKey::" }
   ]
