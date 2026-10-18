@@ -19,7 +19,14 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 resource "aws_iam_role" "github" {
   for_each = var.deployment_policy_arn == null ? toset([]) : toset(["stg", "prd"])
-  name     = "cyllio-${each.key}-github-deploy"
+  name     = "${var.project_name}-${each.key}-github-deploy"
+  tags = {
+    Project       = var.project_name
+    Environment   = each.key
+    ManagedBy     = "Terraform"
+    Component     = "terraform-bootstrap"
+    ResourceGroup = "${var.project_name}-${each.key}"
+  }
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect    = "Allow", Action = "sts:AssumeRoleWithWebIdentity",
     Principal = { Federated = var.github_oidc_provider_arn != null ? var.github_oidc_provider_arn : aws_iam_openid_connect_provider.github[0].arn },

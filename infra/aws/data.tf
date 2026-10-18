@@ -32,9 +32,15 @@ resource "aws_dynamodb_table" "main" {
     type = "S"
   }
   global_secondary_index {
-    name            = "GSI1"
-    hash_key        = "GSI1PK"
-    range_key       = "GSI1SK"
+    name = "GSI1"
+    key_schema {
+      attribute_name = "GSI1PK"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "GSI1SK"
+      key_type       = "RANGE"
+    }
     projection_type = "ALL"
   }
   ttl {

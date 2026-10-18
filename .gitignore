@@ -18,3 +18,7 @@ infra/**/*.json
 !infra/aws/environments/*.tfvars
 *.tfbackend
 crash.log
+*.auto.tfvars.json
+.terraform-*/
+
+**/__pycache__/

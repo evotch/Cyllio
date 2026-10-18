@@ -7,7 +7,21 @@ terraform {
     }
   }
 }
-provider "aws" { region = var.aws_region }
+provider "aws" {
+  region = var.aws_region
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Environment = "shared"
+      ManagedBy   = "Terraform"
+      Component   = "terraform-bootstrap"
+    }
+  }
+}
+variable "project_name" {
+  type    = string
+  default = "cyllio"
+}
 variable "aws_region" {
   type    = string
   default = "us-east-1"

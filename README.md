@@ -1,6 +1,6 @@
 # Cyllio
 
-.NET 10 messaging backend using C# Minimal APIs, with one shared solution and Azure Container Apps infrastructure. The first account foundation is implemented; see [implementation progress](docs/implementation.md) for endpoints, setup, tests and remaining work. See [service boundaries](docs/services.md) for the ten specification services.
+.NET 10 messaging backend using C# Minimal APIs, with one shared solution and AWS infrastructure managed with Terraform. The first account foundation is implemented; see [implementation progress](docs/implementation.md) for endpoints, setup, tests and remaining work. See [service boundaries](docs/services.md) for the ten specification services.
 
 ## Projects
 
@@ -104,23 +104,24 @@ Emulator health: `http://localhost:5300/health`. AMQP: `localhost:5672`. Compose
 ServiceBus__ConnectionString='Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Cyllio.Messaging
 ```
 
-Without a connection string, these hosts continue to run with broker integration disabled. The Azure deployment does not yet provision or configure a cloud Service Bus namespace. This emulator is for development, not production durability; do not rely on message retention across emulator restarts. SQL data uses a named volume, and `docker compose down` retains it.
+Without a connection string, these hosts continue to run with broker integration disabled. The AWS deployment provisions SNS/SQS, but the current Service Bus application adapter is still used only by the existing local stack. This emulator is for development, not production durability; do not rely on message retention across emulator restarts. SQL data uses a named volume, and `docker compose down` retains it.
 
 Identity and Device implement the initial authenticated account APIs. Message persistence, transactional outbox/inbox handling, business event handlers, push delivery and realtime hubs remain to be implemented. Run `python3 scripts/test-accounts.py` to verify the account slice; see [implementation progress](docs/implementation.md) for details. See [Microsoft's emulator documentation](https://learn.microsoft.com/en-us/azure/service-bus-messaging/test-locally-with-service-bus-emulator).
 
-## Azure deployment
+## AWS deployment
 
-See [deployment setup](docs/deployment.md) for Azure OIDC and GitHub configuration.
+See [deployment setup](docs/deployment.md) for Terraform, AWS OIDC, staging/production state, and the application migration boundary.
 
 - `Cyllio.sln`: all service projects belong here.
 - `src`: API entry host and ten independent service projects.
 - `Dockerfile`: shared non-root service image build.
 - `compose.yaml`: local Docker setup for all eleven projects.
-- `services.json`: shared manifest for CI and Azure deployment.
-- `infra/platform.bicep`: registry, image-pull identity, role assignment, logs, Container Apps environment.
-- `infra/apps.bicep`: all service deployments, ingress, probes and scaling.
-- `infra/parameters`: dev and production platform parameters.
-- `.github/workflows/ci.yml`: build, formatting, Bicep compilation, container smoke test.
-- `.github/workflows/deploy.yml`: manually triggered Azure deployment for dev or prod.
+- `services.json`: shared manifest for CI, ECR repositories, and ECS services.
+- `infra/bootstrap`: protected Terraform state bucket and optional GitHub OIDC roles.
+- `infra/aws`: VPC, private ECS Fargate, ECR, API Gateway HTTP API, internal ALB, DynamoDB, S3, SNS/SQS and optional Valkey cache.
+- `infra/aws/environments`: staging and production Terraform inputs.
+- `infra/legacy-azure`: historical Bicep templates retained for reference.
+- `.github/workflows/ci.yml`: build, formatting, Terraform validation and mocked infrastructure tests, container smoke test.
+- `.github/workflows/deploy.yml`: automatic staging Terraform deployment on main pushes; manual staging/production plan or apply.
 
 To add a service, create its project under `src`, add it with `dotnet sln Cyllio.sln add ...`, add it to `services.json`, and build it with the shared Dockerfile.

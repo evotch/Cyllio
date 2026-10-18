@@ -11,3 +11,7 @@ output "events_topic_arn" { value = aws_sns_topic.events.arn }
 output "consumer_queue_urls" { value = { for name, queue in aws_sqs_queue.consumer : name => queue.url } }
 output "cache_endpoint" { value = var.enable_cache ? aws_elasticache_serverless_cache.presence[0].endpoint : null }
 output "services_enabled" { value = var.enable_services }
+
+output "resource_group_name" { value = aws_resourcegroups_group.environment.name }
+output "resource_group_arn" { value = aws_resourcegroups_group.environment.arn }
+output "resource_tags" { value = local.common_tags }

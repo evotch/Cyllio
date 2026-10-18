@@ -1,4 +1,5 @@
 resource "aws_ecr_repository" "service" {
+  tags                 = merge(local.common_tags, { Service = each.key })
   for_each             = local.services
   name                 = "${local.prefix}/${each.value.image}"
   image_tag_mutability = "IMMUTABLE"
@@ -24,6 +25,7 @@ resource "aws_service_discovery_private_dns_namespace" "main" {
   vpc  = aws_vpc.main.id
 }
 resource "aws_service_discovery_service" "service" {
+  tags     = merge(local.common_tags, { Service = each.key })
   for_each = local.deployed
   name     = each.key
   dns_config {
@@ -34,14 +36,16 @@ resource "aws_service_discovery_service" "service" {
       type = "A"
     }
   }
-  health_check_custom_config { failure_threshold = 1 }
+  health_check_custom_config {}
 }
 resource "aws_cloudwatch_log_group" "service" {
+  tags              = merge(local.common_tags, { Service = each.key })
   for_each          = local.services
   name              = "/ecs/${local.prefix}/${each.key}"
   retention_in_days = var.log_retention_days
 }
 resource "aws_iam_role" "execution" {
+  tags     = merge(local.common_tags, { Service = each.key })
   for_each = local.services
   name     = "${local.prefix}-${each.key}-execution"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
@@ -63,6 +67,7 @@ resource "aws_iam_role_policy" "account_secrets" {
   ]) })
 }
 resource "aws_iam_role" "task" {
+  tags     = merge(local.common_tags, { Service = each.key })
   for_each = local.services
   name     = "${local.prefix}-${each.key}-task"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
@@ -70,6 +75,7 @@ resource "aws_iam_role" "task" {
   }] })
 }
 resource "aws_ecs_task_definition" "service" {
+  tags                     = merge(local.common_tags, { Service = each.key })
   for_each                 = local.deployed
   family                   = "${local.prefix}-${each.key}"
   requires_compatibilities = ["FARGATE"]
@@ -111,14 +117,17 @@ resource "aws_ecs_task_definition" "service" {
   }
 }
 resource "aws_ecs_service" "service" {
-  for_each              = local.deployed
-  name                  = "${local.prefix}-${each.key}"
-  cluster               = aws_ecs_cluster.main.id
-  task_definition       = aws_ecs_task_definition.service[each.key].arn
-  desired_count         = var.environment == "prd" ? 2 : 1
-  launch_type           = "FARGATE"
-  platform_version      = "1.4.0"
-  wait_for_steady_state = true
+  enable_ecs_managed_tags = true
+  propagate_tags          = "SERVICE"
+  tags                    = merge(local.common_tags, { Service = each.key })
+  for_each                = local.deployed
+  name                    = "${local.prefix}-${each.key}"
+  cluster                 = aws_ecs_cluster.main.id
+  task_definition         = aws_ecs_task_definition.service[each.key].arn
+  desired_count           = var.environment == "prd" ? 2 : 1
+  launch_type             = "FARGATE"
+  platform_version        = "1.4.0"
+  wait_for_steady_state   = true
   deployment_circuit_breaker {
     enable   = true
     rollback = true

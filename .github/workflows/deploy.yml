@@ -1,97 +1,121 @@
-name: Deploy Azure
+name: Deploy AWS
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
         description: Target environment
         type: choice
-        options: [dev, prod]
-        default: dev
+        options: [stg, prd]
+        default: stg
         required: true
+      operation:
+        description: Review a plan or apply it
+        type: choice
+        options: [plan, apply]
+        default: plan
+        required: true
+      deploy_services:
+        description: Deploy current containers (requires initial foundation apply and MongoDB compatibility secret)
+        type: boolean
+        default: false
 permissions:
   contents: read
-  id-token: write
 concurrency:
-  group: deploy-${{ inputs.environment }}
+  group: deploy-aws-${{ inputs.environment || 'stg' }}
   cancel-in-progress: false
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    env:
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      LOCATION: ${{ vars.AZURE_LOCATION }}
-      TARGET_ENV: ${{ inputs.environment }}
-      MONGO_CONNECTION_STRING: ${{ secrets.MONGO_CONNECTION_STRING }}
-      AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
-      AUTH_PHONE_HASH_KEY: ${{ secrets.AUTH_PHONE_HASH_KEY }}
-      ACS_SMS_CONNECTION_STRING: ${{ secrets.ACS_SMS_CONNECTION_STRING }}
-      ACS_SMS_SENDER: ${{ vars.ACS_SMS_SENDER }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
-          dotnet-version: '10.0.x'
-      - run: dotnet build Cyllio.sln -c Release
-      - name: Prepare secure account parameters
-        shell: bash
+          terraform_version: '1.13.5'
+          terraform_wrapper: false
+      - name: Validate Terraform before deployment
         run: |
-          python3 - <<'PYTHON'
-          import json, os
-          from pathlib import Path
-          names = {'mongoConnectionString': 'MONGO_CONNECTION_STRING', 'authSigningKey': 'AUTH_SIGNING_KEY', 'authPhoneHashKey': 'AUTH_PHONE_HASH_KEY'}
-          values = {key: os.environ.get(name, '') for key, name in names.items()}
-          for key, name in names.items():
-              if not values[key] or (key != 'mongoConnectionString' and len(values[key].encode()) < 32):
-                  raise SystemExit('Configure GitHub environment secret ' + name)
-          acs_connection = os.environ.get('ACS_SMS_CONNECTION_STRING', '')
-          acs_sender = os.environ.get('ACS_SMS_SENDER', '')
-          if bool(acs_connection) != bool(acs_sender):
-              raise SystemExit('Configure both ACS_SMS_CONNECTION_STRING secret and ACS_SMS_SENDER variable')
-          values.update(acsSmsConnectionString=acs_connection, acsSmsSender=acs_sender)
-          path = Path(os.environ['RUNNER_TEMP']) / 'account-parameters.json'
-          path.write_text(json.dumps({'parameters': {key: {'value': value} for key, value in values.items()}}))
-          path.chmod(0o600)
-          PYTHON
-      - uses: azure/login@v2
+          set -euo pipefail
+          terraform fmt -check -recursive infra/aws infra/bootstrap
+          terraform -chdir=infra/aws init -backend=false -input=false
+          terraform -chdir=infra/aws validate
+          terraform -chdir=infra/aws test
+          terraform -chdir=infra/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/bootstrap validate
+          terraform -chdir=infra/bootstrap test
+      - name: Verify deployment selection
+        run: python3 -m unittest discover -s tests/pipeline -v
+  deploy:
+    needs: validate
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'stg' }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      ACCOUNT_SECRET_ARN: ${{ vars.ACCOUNT_SECRET_ARN }}
+      ACCOUNT_SECRET_KMS_KEY_ARN: ${{ vars.ACCOUNT_SECRET_KMS_KEY_ARN }}
+      TARGET_ENV: ${{ inputs.environment || 'stg' }}
+      OPERATION: ${{ github.event_name == 'push' && 'apply' || inputs.operation }}
+      REQUESTED_DEPLOY_SERVICES: ${{ inputs.deploy_services && 'true' || 'false' }}
+      TF_IN_AUTOMATION: 'true'
+    defaults:
+      run:
+        working-directory: infra/aws
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Deploy platform
-        id: platform
-        shell: bash
+          terraform_version: '1.13.5'
+          terraform_wrapper: false
+      - name: Validate deployment inputs
         run: |
           set -euo pipefail
-          : "${RESOURCE_GROUP:?Set AZURE_RESOURCE_GROUP}"
-          : "${LOCATION:?Set AZURE_LOCATION}"
-          az bicep install
-          az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --output none
-          az deployment group create --name platform --resource-group "$RESOURCE_GROUP"             --template-file infra/platform.bicep --parameters "infra/parameters/$TARGET_ENV.bicepparam"             --parameters location="$LOCATION" --output json > "$RUNNER_TEMP/platform.json"
-          for key in registryName registryServer identityId environmentId; do
-            value=$(jq -r ".properties.outputs.$key.value" "$RUNNER_TEMP/platform.json")
-            echo "$key=$value" >> "$GITHUB_OUTPUT"
-          done
-      - name: Build and push all service images
-        env:
-          REGISTRY: ${{ steps.platform.outputs.registryName }}
-          SERVER: ${{ steps.platform.outputs.registryServer }}
+          : "${AWS_REGION:?Set GitHub environment variable AWS_REGION}"
+          : "${STATE_BUCKET:?Set GitHub environment variable TF_STATE_BUCKET}"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Initialize remote state
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=$TARGET_ENV/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="encrypt=true" -backend-config="use_lockfile=true"
+          terraform validate
+          terraform output -json > "$RUNNER_TEMP/terraform-outputs.json"
+      - name: Resolve deployment configuration
+        run: python3 ../../scripts/prepare-aws-deployment.py "$RUNNER_TEMP/terraform-outputs.json"
+      - name: Build and push service images
+        if: env.OPERATION == 'apply' && env.DEPLOY_SERVICES == 'true'
         run: |
           set -euo pipefail
-          az acr login --name "$REGISTRY"
-          while IFS=$'\t' read -r project image; do
-            docker build --build-arg SERVICE_PROJECT="$project" -t "$SERVER/$image:$GITHUB_SHA" .
-            docker push "$SERVER/$image:$GITHUB_SHA"
-          done < <(jq -r '.[] | [.project, .image] | @tsv' services.json)
-      - name: Deploy services and verify public endpoints
-        env:
-          SERVER: ${{ steps.platform.outputs.registryServer }}
-          IDENTITY: ${{ steps.platform.outputs.identityId }}
-          APPS_ENVIRONMENT: ${{ steps.platform.outputs.environmentId }}
+          terraform output -json ecr_repositories > "$RUNNER_TEMP/ecr.json"
+          registry=$(jq -r '.api | split("/")[0]' "$RUNNER_TEMP/ecr.json")
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          while IFS=$'\t' read -r name project; do
+            repository_url=$(jq -er --arg name "$name" '.[$name]' "$RUNNER_TEMP/ecr.json")
+            repository_name=${repository_url#*/}
+            if aws ecr describe-images --repository-name "$repository_name" --image-ids imageTag="$GITHUB_SHA" >/dev/null 2>&1; then
+              continue
+            fi
+            docker build --platform linux/amd64 --build-arg SERVICE_PROJECT="$project" -t "$repository_url:$GITHUB_SHA" ../..
+            docker push "$repository_url:$GITHUB_SHA"
+          done < <(jq -r '.[] | [.name, .project] | @tsv' ../../services.json)
+      - name: Plan
+        run: terraform plan -input=false -var-file="environments/$TARGET_ENV.tfvars" -var="aws_region=$AWS_REGION" -var="enable_services=$DEPLOY_SERVICES" -out=deployment.tfplan
+      - name: Apply Terraform plan
+        if: env.OPERATION == 'apply'
+        run: terraform apply -input=false deployment.tfplan
+      - name: Check deployed API
+        if: env.OPERATION == 'apply' && env.DEPLOY_SERVICES == 'true'
         run: |
-          set -euo pipefail
-          az deployment group create --name apps --resource-group "$RESOURCE_GROUP"             --template-file infra/apps.bicep --parameters "@$RUNNER_TEMP/account-parameters.json" --parameters environment="$TARGET_ENV" location="$LOCATION"             registryServer="$SERVER" identityId="$IDENTITY" environmentId="$APPS_ENVIRONMENT" imageTag="$GITHUB_SHA"             --query properties.outputs.serviceUrls.value --output json > "$RUNNER_TEMP/service-urls.json"
-          while IFS=$'\t' read -r name url; do
-            curl --fail --retry 15 --retry-all-errors --retry-delay 5 "$url/health/ready"
-            echo "$name: $url" >> "$GITHUB_STEP_SUMMARY"
-          done < <(jq -r '.[] | select(.external) | [.name, .url] | @tsv' "$RUNNER_TEMP/service-urls.json")
+          base_url=$(terraform output -raw api_base_url)
+          curl --fail --retry 15 --retry-all-errors --retry-delay 5 "${base_url%/api/v1}/health/ready"
+          echo "API: $base_url" >> "$GITHUB_STEP_SUMMARY"

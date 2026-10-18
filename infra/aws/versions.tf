@@ -11,13 +11,19 @@ terraform {
 provider "aws" {
   region = var.aws_region
   default_tags {
-    tags = { Project = var.project_name, Environment = var.environment, ManagedBy = "Terraform" }
+    tags = local.common_tags
   }
 }
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" { state = "available" }
 locals {
+  common_tags = {
+    Project       = var.project_name
+    Environment   = var.environment
+    ManagedBy     = "Terraform"
+    ResourceGroup = "${var.project_name}-${var.environment}"
+  }
   prefix           = "${var.project_name}-${var.environment}"
   manifest         = jsondecode(file("${path.module}/../../services.json"))
   services         = { for service in local.manifest : service.name => service }
