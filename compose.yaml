@@ -1,0 +1,239 @@
+name: cyllio
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  environment:
+    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_HTTP_PORTS: "8080"
+
+services:
+  api:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Services__Identity: "http://identity:8080/"
+      Services__Device: "http://device:8080/"
+    depends_on:
+      identity:
+        condition: service_started
+      device:
+        condition: service_started
+    image: cyllio-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Api
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  identity:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
+      Mongo__Database: cyllio_accounts
+      Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
+      Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
+      Auth__EnableDevelopmentOtp: "true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    image: cyllio-identity:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Identity
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  device:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
+      Mongo__Database: cyllio_accounts
+      Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
+      Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    image: cyllio-device:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Device
+    ports:
+      - "127.0.0.1:8082:8080"
+
+  messaging:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+    depends_on:
+      servicebus:
+        condition: service_started
+    image: cyllio-messaging:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Messaging
+    ports:
+      - "127.0.0.1:8083:8080"
+
+  realtime:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+    depends_on:
+      servicebus:
+        condition: service_started
+    image: cyllio-realtime:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Realtime.Gateway
+    ports:
+      - "127.0.0.1:8084:8080"
+
+  group:
+    <<: *service-defaults
+    image: cyllio-group:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Group
+    ports:
+      - "127.0.0.1:8085:8080"
+
+  media:
+    <<: *service-defaults
+    image: cyllio-media:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Media
+    ports:
+      - "127.0.0.1:8086:8080"
+
+  key:
+    <<: *service-defaults
+    image: cyllio-key:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Key
+    ports:
+      - "127.0.0.1:8087:8080"
+
+  call:
+    <<: *service-defaults
+    image: cyllio-call:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Call
+    ports:
+      - "127.0.0.1:8088:8080"
+
+  notification:
+    <<: *service-defaults
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+    depends_on:
+      servicebus:
+        condition: service_started
+    image: cyllio-notification:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.Notification
+    ports:
+      - "127.0.0.1:8089:8080"
+
+  trust-safety:
+    <<: *service-defaults
+    image: cyllio-trust-safety:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: Cyllio.TrustSafety
+    ports:
+      - "127.0.0.1:8090:8080"
+
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-N}
+      SQL_SERVER: servicebus-sql
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
+      SQL_WAIT_INTERVAL: "15"
+    volumes:
+      - ./docker/servicebus/config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:5300:5300"
+    depends_on:
+      servicebus-sql:
+        condition: service_healthy
+
+  servicebus-sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-N}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    volumes:
+      - servicebus-sql-data:/var/opt/mssql
+
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - 'try { rs.status(); } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}); } if (!db.hello().isWritablePrimary) quit(1);'
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  mongo-data:
+  servicebus-sql-data:

@@ -1,9 +1,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY global.json Directory.Build.props ./
-COPY src/Cyllio.Api/Cyllio.Api.csproj src/Cyllio.Api/
+COPY src/ src/
 RUN dotnet restore src/Cyllio.Api/Cyllio.Api.csproj
-COPY src/Cyllio.Api/ src/Cyllio.Api/
 RUN dotnet publish src/Cyllio.Api/Cyllio.Api.csproj -c Release --no-restore -o /app/publish /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

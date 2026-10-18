@@ -14,6 +14,16 @@ Set these GitHub environment variables:
 | `AZURE_RESOURCE_GROUP` | e.g. `rg-cyllio-dev` or `rg-cyllio-prod` |
 | `AZURE_LOCATION` | e.g. `eastus` |
 
+Also set these GitHub **environment secrets** for the account APIs:
+
+| Secret | Value |
+| --- | --- |
+| `MONGO_CONNECTION_STRING` | TLS connection URI for a reachable MongoDB replica set supporting transactions; provision it separately. |
+| `AUTH_SIGNING_KEY` | Independent random signing secret of at least 32 bytes. |
+| `AUTH_PHONE_HASH_KEY` | Independent stable random phone-lookup secret of at least 32 bytes. |
+
+The pipeline validates these before creating Azure resources and passes them through a protected temporary parameter file into Container App secrets. API routes use the account services' internal HTTPS addresses. The development OTP provider is disabled in Azure; a production SMS/voice adapter still needs implementation before phone verification can run there. The local MongoDB container is not deployed by Bicep.
+
 Use Azure CLI as an Azure administrator to create the group and deployment identity (replace placeholders):
 
 ```sh

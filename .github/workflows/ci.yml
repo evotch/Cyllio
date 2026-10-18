@@ -23,6 +23,8 @@ jobs:
           az bicep build --file infra/apps.bicep
           az bicep build-params --file infra/parameters/dev.bicepparam
           az bicep build-params --file infra/parameters/prod.bicepparam
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example config --quiet
       - name: Build and smoke test every service
         shell: bash
         run: |
@@ -30,7 +32,45 @@ jobs:
           trap 'docker logs service-smoke 2>/dev/null || true; docker rm -f service-smoke 2>/dev/null || true' EXIT
           while IFS=$'\t' read -r project image; do
             docker build --build-arg SERVICE_PROJECT="$project" -t "$image:ci" .
+            # Account hosts are tested with their database in the integration job below.
+            if [[ "$project" == "Cyllio.Identity" || "$project" == "Cyllio.Device" ]]; then continue; fi
             docker run -d --name service-smoke -p 127.0.0.1:8080:8080 "$image:ci"
-            curl --fail --retry 12 --retry-all-errors --retry-delay 2 http://localhost:8080/health/ready
+            curl --fail --retry 12 --retry-all-errors --retry-delay 2 http://localhost:8080/health/live
             docker rm -f service-smoke
           done < <(jq -r '.[] | [.project, .image] | @tsv' services.json)
+
+  servicebus-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure local emulator
+        shell: bash
+        run: |
+          printf 'ACCEPT_EULA=Y\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\nAUTH_PHONE_HASH_KEY=%s\n' "$(openssl rand -hex 24)Aa1!" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" > .env
+      - name: Start broker and consumers
+        run: docker compose up --build -d messaging notification realtime
+      - name: Verify topic fan-out
+        run: bash scripts/test-servicebus.sh
+      - name: Show logs and clean up
+        if: always()
+        run: |
+          docker compose logs --tail 50 servicebus messaging notification realtime
+          docker compose down
+
+  accounts-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure local account secrets
+        shell: bash
+        run: |
+          printf 'ACCEPT_EULA=N\nMSSQL_SA_PASSWORD=%s\nAUTH_SIGNING_KEY=%s\nAUTH_PHONE_HASH_KEY=%s\n' "$(openssl rand -hex 24)Aa1!" "$(openssl rand -hex 48)" "$(openssl rand -hex 48)" > .env
+      - name: Start account APIs and MongoDB
+        run: docker compose up --build -d api identity device
+      - name: Verify authorization and concurrency
+        run: python3 scripts/test-accounts.py
+      - name: Show service logs and clean up
+        if: always()
+        run: |
+          docker compose logs --tail 30 api identity device
+          docker compose down
