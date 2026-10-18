@@ -12,11 +12,11 @@ The target is `messaging_backend_api_specification_v2.0_aws_native.docx`, especi
 - SNS events topic plus dedicated SQS queues and DLQs for notification, realtime and trust-safety consumers. Queue policies accept only this SNS topic. Queue age and DLQ depth alarms can notify an existing `alarm_topic_arn`.
 - Optional private ElastiCache Serverless Valkey (`enable_cache=true`), disabled until needed.
 
-The public API URL is an AWS-provided HTTPS endpoint, so an initial deploy does not require a custom domain or certificate. Custom domains/DNS, CloudFront signed media delivery, API Gateway WebSocket authorization/integrations, WAF, mobile push platform applications, Chime and scheduler/workflow resources remain follow-up work. No unauthenticated placeholder WebSocket endpoint is exposed. Logs omit phone numbers, request bodies and query strings. Cross-service private HTTP stays within the VPC security groups; service-to-service TLS is follow-up work.
+The public API URL is an AWS-provided HTTPS endpoint, so an initial deploy does not require a custom domain or certificate. Custom domains/DNS, CloudFront signed media delivery, API Gateway WebSocket authorization/integrations, WAF, mobile push platform applications, Chime and scheduler/workflow resources remain follow-up work. No unauthenticated placeholder WebSocket endpoint is exposed. Application/API access logs omit phone numbers, request bodies and query strings; SMS delivery-event logs are covered separately below. Cross-service private HTTP stays within the VPC security groups; service-to-service TLS is follow-up work.
 
 ## Application migration boundary
 
-**Infrastructure creation does not migrate the .NET implementation to AWS APIs.** The current account code still needs MongoDB, the broker adapter still uses Service Bus, and real OTP currently uses ACS. The new DynamoDB/SNS/SQS resources are not consumed by current application code. AWS SMS, DynamoDB repositories, transactional outbox/consumers, WebSocket ticket authorization, push and calling need application implementations before the v2 platform is operational.
+**Infrastructure creation does not migrate the .NET implementation to AWS APIs.** The current account code still needs MongoDB, the broker adapter still uses Service Bus, and OTP now uses AWS End User Messaging SMS with approved country-specific origination identities. The new DynamoDB/SNS/SQS resources are not consumed by current application code. DynamoDB repositories, transactional outbox/consumers, WebSocket ticket authorization, push and calling still need application implementations before the v2 platform is operational.
 
 `enable_services=false` is the default. It creates the foundation without starting applications that cannot yet use DynamoDB. The API returns no healthy application response until containers are deployed. To run the current account slice temporarily on AWS:
 
@@ -32,9 +32,9 @@ The public API URL is an AWS-provided HTTPS endpoint, so an initial deploy does 
    ```
 
 3. Set `account_secret_arn` to its ARN. Supply `account_secret_kms_key_arn` if the secret uses a customer-managed key. Only Identity and Device execution roles may retrieve it. Values are injected directly by ECS; Terraform manages no secret versions and does not read secret values into state.
-4. Push all images with an immutable tag, then enable services with that tag. Production runs two tasks per host; staging runs one. Rollback is enabled on failed ECS deployments. Other hosts remain feature scaffolds, and the AWS deployment does not inject ACS credentials or enable development OTP. Verification start returns 503 until an AWS SMS adapter is added.
+4. Push all images with an immutable tag, then enable services with that tag. Production runs two tasks per host; staging runs one. Rollback is enabled on failed ECS deployments. Other hosts remain feature scaffolds, and the AWS deployment does not inject ACS credentials or enable development OTP. Verification start returns 503 until at least one approved short-code/pool ARN is configured; unsupported destination countries return 400.
 
-Task roles intentionally have no data-plane AWS permissions yet: add narrowly scoped DynamoDB, SNS/SQS, media, SMS and Chime permissions alongside the respective application adapters, rather than granting every host access to all data now. ECS execution roles only pull images, write logs and fetch their permitted account secret.
+Task roles have no general data-plane AWS access. Identity receives only scoped SMS send access when approved sender ARNs are configured; add DynamoDB, SNS/SQS, media and Chime permissions alongside their future adapters. ECS execution roles only pull images, write logs and fetch their permitted account secret.
 
 ## Bootstrap remote state
 
@@ -106,7 +106,7 @@ On the first main push, application services remain disabled and the pipeline cr
 
 You can also run **Deploy AWS** manually with `stg` or `prd`; manual runs default to **plan**. Apply with `deploy_services=false` to create the foundation/ECR repositories. After configuring the compatibility secret, apply again with `deploy_services=true` to build/push all images and start the containers. Building uses `linux/amd64` to match Fargate task architecture. The selected commit SHA is an immutable image tag; an existing tag is reused on retries. ECS must become stable and the HTTPS readiness check must pass. A services plan can be reviewed before image publication, but its apply run rebuilds the plan after publishing images.
 
-A local commit does not run a deployment; pushing or merging it to `main` triggers the staging deployment. No data migration is performed. Existing local MongoDB, ACS settings, Service Bus emulator, iPhone configuration and Azure resources remain unchanged.
+A local commit does not run a deployment; pushing or merging it to `main` triggers the staging deployment. No data migration is performed. Existing MongoDB, Service Bus emulator, iPhone configuration and Azure resources remain unchanged. The Identity SMS adapter now uses AWS; old ACS env entries are no longer consumed by Compose.
 
 ## Validation
 
@@ -123,9 +123,9 @@ Mock-provider tests cover staging/production network topology, private compute/m
 
 References: [AWS ECS private service integration](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-private.html), [Terraform S3 state/locking](https://developer.hashicorp.com/terraform/language/backend/s3).
 
-## Local ACS verification
+## Local AWS verification
 
-The existing Compose stack still uses your configured ACS sender/connection string from the ignored env file. `ACS_SMS_CONNECTION_STRING` and `ACS_SMS_SENDER` must both be set for real SMS; ACS configuration disables development OTP retrieval. `AUTH_ENABLE_DEVELOPMENT_OTP` is only useful locally when ACS is unset. These settings are deliberately not copied into the AWS Terraform tasks. Keep the iPhone simulator pointed at local Compose until the AWS application adapters are ready.
+Compose uses the AWS SMS settings listed in `.env.example`. Leave them empty and keep `AUTH_ENABLE_DEVELOPMENT_OTP=true` to use development-only test codes. Setting `AWS_SMS_ENABLED=true`, or providing partial SMS settings, disables development code retrieval. Live sending requires standard AWS credentials available to the backend, region, configuration set and an approved country-specific origination ARN; ECS uses its task role automatically. For local live testing, run Identity with an authenticated AWS SDK credential chain. AWS credentials belong on the backend, never in the iPhone app. Old ACS settings are obsolete and do not send SMS through the new adapter.
 
 ## Environment resource groups and tags
 
@@ -148,3 +148,22 @@ Set `create_deployment_policies=true` to create a separate Terraform deployment 
 ## GitHub OIDC immutable repository subjects
 
 Newer GitHub repositories include immutable owner/repository IDs in the OIDC subject. For this repository, CloudTrail recorded `repo:evotch@15218305/Cyllio@1409423918:environment:stg`. Configure `github_oidc_repository="evotch@15218305/Cyllio@1409423918"` in bootstrap; Terraform appends the matching environment for each role. `github_repository` remains the normal `evotch/Cyllio` repository name. Legacy subjects are supported by leaving the override null. Never replace exact environment trust with a broad repository wildcard to work around a mismatch. Inspect only the subject/audience/role metadata, not the full signed token.
+
+## AWS OTP SMS and dedicated short codes (US and Bulgaria)
+
+Terraform creates a transactional SMS configuration set (`cyllio-stg-otp` / `cyllio-prd-otp`), delivery-event CloudWatch log group, an SMS service role permitted to write only those logs, and an Identity task send policy limited to the provided origination identities/configuration set. Delivery-event logs can contain destination phone numbers; retention follows `log_retention_days` and access should remain restricted. The SDK adapter does not log OTP codes, message bodies or provider exception text. Automatic SDK retries are disabled after ambiguous send failures, and message TTL never exceeds the OTP's remaining lifetime. Real OTP verification still happens in Identity/MongoDB; AWS transports the SMS.
+
+Short codes are registered national sending numbers, usually five or six digits. Request separate dedicated short codes for the US and Bulgaria through AWS Support, including carrier registrations and any required opt-in evidence. Terraform cannot manufacture an approved short code by setting a five-digit sender string. It deliberately does not reserve a substitute paid number or silently send with an alphanumeric sender ID. See [AWS short-code requests](https://docs.aws.amazon.com/sms-voice/latest/userguide/phone-numbers-request-short-code.html) and the prepared [request checklist](sms-short-code-requests.md).
+
+Once AWS has provisioned the short codes in the sending region, add their phone-number ARNs to the corresponding environment's Terraform inputs:
+
+```hcl
+sms_origination_identities = {
+  US = "arn:aws:sms-voice:us-west-2:ACCOUNT_ID:phone-number/phone-US_ID"
+  BG = "arn:aws:sms-voice:us-west-2:ACCOUNT_ID:phone-number/phone-BG_ID"
+}
+```
+
+Terraform injects these ARNs, region and configuration-set name into Identity; only the Identity task role gets `sms-voice:SendTextMessage`. The backend parses numbers with libphonenumber: valid US numbers use the US identity, Bulgarian numbers use the BG identity, and unsupported countries (including Canadian +1 numbers) are rejected before creating a challenge or making an SMS call. No AWS access keys are stored in Terraform or ECS configuration. The bootstrap deployment policies include the SMS control-plane operations and narrowly targeted permission to pass the event-log role to `sms-voice.amazonaws.com`; apply bootstrap policy changes before deploying this module.
+
+A foundation-only deployment creates configuration/logging but grants no send permission while the identity map is empty. SMS account production access, spending quotas, sandbox destination verification and short-code carrier approvals are account/telecom setup steps; Terraform does not bypass them. Tests use fake AWS clients/mock providers and never send or purchase SMS. Run `dotnet run --project tests/Cyllio.Otp.Tests` and `terraform -chdir=infra/aws test` to verify the adapter and wiring.

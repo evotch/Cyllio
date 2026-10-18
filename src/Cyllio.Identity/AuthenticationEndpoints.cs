@@ -31,6 +31,8 @@ internal static partial class AuthenticationEndpoints
             return Results.Problem(statusCode: 503, title: "OTP provider is not configured");
         if (body.Channel != "sms" && !delivery.IsDevelopment)
             return AccountApi.Invalid("Only sms verification is supported by the configured provider.");
+        if (!delivery.Supports(body.PhoneNumber))
+            return AccountApi.Invalid("SMS verification is not configured for this destination country.");
         var now = DateTime.UtcNow;
         var phoneHash = tokens.PhoneHash(body.PhoneNumber);
         if (await database.Challenges.Find(x => x.PhoneHash == phoneHash && x.CreatedAt > now.AddSeconds(-30)).AnyAsync(cancellationToken))

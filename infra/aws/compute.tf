@@ -99,7 +99,13 @@ resource "aws_ecs_task_definition" "service" {
       ], each.key == "api" ? [
       { name = "Services__Identity", value = "http://identity.${local.namespace}:8080/" },
       { name = "Services__Device", value = "http://device.${local.namespace}:8080/" }
-    ] : [])
+      ] : [], each.key == "identity" && var.enable_sms ? concat([
+        { name = "Auth__Sms__Enabled", value = "true" },
+        { name = "Auth__Sms__Region", value = var.aws_region },
+        { name = "Auth__Sms__ConfigurationSet", value = aws_pinpointsmsvoicev2_configuration_set.otp[0].name }
+        ], [for country, arn in var.sms_origination_identities : {
+          name = "Auth__Sms__OriginationIdentities__${country}", value = arn
+    }]) : [])
     secrets = contains(local.account_services, each.key) ? local.account_secrets : []
     logConfiguration = { logDriver = "awslogs", options = {
       awslogs-group = aws_cloudwatch_log_group.service[each.key].name, awslogs-region = var.aws_region, awslogs-stream-prefix = "ecs"
@@ -146,5 +152,5 @@ resource "aws_ecs_service" "service" {
       container_port   = 8080
     }
   }
-  depends_on = [aws_lb_listener.api, aws_iam_role_policy_attachment.execution, aws_iam_role_policy.account_secrets, aws_route_table_association.private]
+  depends_on = [aws_lb_listener.api, aws_iam_role_policy_attachment.execution, aws_iam_role_policy.account_secrets, aws_iam_role_policy.identity_sms, aws_pinpointsmsvoicev2_event_destination.otp, aws_route_table_association.private]
 }

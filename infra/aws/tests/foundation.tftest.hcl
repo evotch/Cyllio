@@ -101,3 +101,68 @@ run "missing_compatibility_secret" {
   }
   expect_failures = [aws_ecs_task_definition.service]
 }
+
+run "sms_without_approved_short_codes" {
+  command = plan
+  variables { environment = "stg" }
+  assert {
+    condition     = aws_pinpointsmsvoicev2_configuration_set.otp[0].name == "cyllio-stg-otp" && aws_pinpointsmsvoicev2_configuration_set.otp[0].default_message_type == "TRANSACTIONAL"
+    error_message = "Each environment needs its own transactional SMS configuration."
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.identity_sms) == 0 && length(aws_pinpointsmsvoicev2_event_destination.otp) == 1
+    error_message = "Create logging but grant no SMS send permission before approved short codes are supplied."
+  }
+}
+run "sms_country_permissions_and_wiring" {
+  command = plan
+  variables {
+    environment        = "stg"
+    enable_services    = true
+    image_tag          = "0123456789abcdef"
+    account_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-abcdef"
+    sms_origination_identities = {
+      US = "arn:aws:sms-voice:us-east-1:123456789012:phone-number/phone-us"
+      BG = "arn:aws:sms-voice:us-east-1:123456789012:phone-number/phone-bg"
+    }
+  }
+  override_resource {
+    target          = aws_pinpointsmsvoicev2_configuration_set.otp[0]
+    override_during = plan
+    values          = { arn = "arn:aws:sms-voice:us-east-1:123456789012:configuration-set/cyllio-stg-otp" }
+  }
+  override_resource {
+    target          = aws_ecr_repository.service["identity"]
+    override_during = plan
+    values          = { repository_url = "123456789012.dkr.ecr.us-east-1.amazonaws.com/cyllio-stg/cyllio-identity" }
+  }
+  assert {
+    condition = (
+      length(aws_iam_role_policy.identity_sms) == 1 &&
+      jsondecode(aws_iam_role_policy.identity_sms[0].policy).Statement[0].Action[0] == "sms-voice:SendTextMessage" &&
+      length(jsondecode(aws_iam_role_policy.identity_sms[0].policy).Statement[0].Resource) == 3 &&
+      !contains(jsondecode(aws_iam_role_policy.identity_sms[0].policy).Statement[0].Resource, "*")
+    )
+    error_message = "Only Identity may send, using the two supplied identities and its own configuration set."
+  }
+  assert {
+    condition = alltrue([for entry in jsondecode(aws_ecs_task_definition.service["identity"].container_definitions)[0].environment :
+      entry.name != "Auth__EnableDevelopmentOtp" || entry.value == "false"
+      ]) && contains(
+      [for entry in jsondecode(aws_ecs_task_definition.service["identity"].container_definitions)[0].environment : "${entry.name}=${entry.value}"],
+      "Auth__Sms__OriginationIdentities__BG=arn:aws:sms-voice:us-east-1:123456789012:phone-number/phone-bg"
+    )
+    error_message = "Identity must receive the country-specific AWS SMS configuration without enabling development OTP."
+  }
+}
+run "sms_disabled" {
+  command = plan
+  variables {
+    environment = "stg"
+    enable_sms  = false
+  }
+  assert {
+    condition     = length(aws_pinpointsmsvoicev2_configuration_set.otp) == 0 && length(aws_iam_role_policy.identity_sms) == 0
+    error_message = "Explicitly disabling SMS must remove its configuration and send permissions."
+  }
+}

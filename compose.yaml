@@ -38,8 +38,11 @@ services:
       Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
       Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
       Auth__EnableDevelopmentOtp: ${AUTH_ENABLE_DEVELOPMENT_OTP:-true}
-      Auth__Sms__ConnectionString: ${ACS_SMS_CONNECTION_STRING:-}
-      Auth__Sms__Sender: ${ACS_SMS_SENDER:-}
+      Auth__Sms__Enabled: ${AWS_SMS_ENABLED:-false}
+      Auth__Sms__Region: ${AWS_REGION:-us-west-2}
+      Auth__Sms__ConfigurationSet: ${AWS_SMS_CONFIGURATION_SET:-}
+      Auth__Sms__OriginationIdentities__US: ${AWS_SMS_US_ORIGINATION_IDENTITY:-}
+      Auth__Sms__OriginationIdentities__BG: ${AWS_SMS_BG_ORIGINATION_IDENTITY:-}
     depends_on:
       mongo:
         condition: service_healthy

@@ -17,7 +17,7 @@ resource "aws_iam_policy" "deployment" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     {
       Sid       = "RegionalInfrastructure", Effect = "Allow", Resource = "*",
-      Action    = ["ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "apigateway:*", "servicediscovery:*", "logs:*", "cloudwatch:*", "dynamodb:*", "kms:*", "sns:*", "sqs:*", "elasticache:*", "resource-groups:*", "tag:GetResources", "tag:GetTagKeys", "tag:GetTagValues"],
+      Action    = ["ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "apigateway:*", "servicediscovery:*", "logs:*", "cloudwatch:*", "dynamodb:*", "kms:*", "sns:*", "sqs:*", "elasticache:*", "resource-groups:*", "sms-voice:*", "tag:GetResources", "tag:GetTagKeys", "tag:GetTagValues"],
       Condition = { StringEquals = { "aws:RequestedRegion" = var.aws_region } }
     },
     {
@@ -27,7 +27,7 @@ resource "aws_iam_policy" "deployment" {
     {
       Sid      = "TaskRoles", Effect = "Allow",
       Action   = ["iam:CreateRole", "iam:GetRole", "iam:DeleteRole", "iam:UpdateAssumeRolePolicy", "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy"],
-      Resource = ["arn:aws:iam::*:role/${var.project_name}-${each.key}-*-task", "arn:aws:iam::*:role/${var.project_name}-${each.key}-*-execution"]
+      Resource = ["arn:aws:iam::*:role/${var.project_name}-${each.key}-*-task", "arn:aws:iam::*:role/${var.project_name}-${each.key}-*-execution", "arn:aws:iam::*:role/${var.project_name}-${each.key}-sms-events"]
     },
     {
       Sid       = "ExecutionRolePolicy", Effect = "Allow", Action = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"],
@@ -42,6 +42,11 @@ resource "aws_iam_policy" "deployment" {
     {
       Sid       = "ServiceLinkedRoles", Effect = "Allow", Action = ["iam:CreateServiceLinkedRole"], Resource = "*",
       Condition = { StringEquals = { "iam:AWSServiceName" = ["ecs.amazonaws.com", "elasticloadbalancing.amazonaws.com", "ops.apigateway.amazonaws.com", "elasticache.amazonaws.com", "servicediscovery.amazonaws.com"] } }
+    },
+    {
+      Sid       = "PassSmsEventsRole", Effect = "Allow", Action = ["iam:PassRole"],
+      Resource  = "arn:aws:iam::*:role/${var.project_name}-${each.key}-sms-events",
+      Condition = { StringEquals = { "iam:PassedToService" = "sms-voice.amazonaws.com" } }
     },
     {
       Sid    = "PrivateNamespace", Effect = "Allow", Resource = "*",

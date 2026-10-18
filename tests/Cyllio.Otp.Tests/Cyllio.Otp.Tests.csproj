@@ -5,7 +5,8 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Azure.Communication.Sms" Version="1.0.2" />
+    <PackageReference Include="AWSSDK.PinpointSMSVoiceV2" Version="4.0.104.1" />
+    <PackageReference Include="libphonenumber-csharp" Version="9.0.41" />
     <Compile Include="../../src/Cyllio.Identity/OtpDelivery.cs" Link="OtpDelivery.cs" />
     <Compile Include="../../src/Cyllio.Identity/DevelopmentOtpDelivery.cs" Link="DevelopmentOtpDelivery.cs" />
     <Using Include="Microsoft.Extensions.Configuration" />
