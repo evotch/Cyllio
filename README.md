@@ -117,7 +117,7 @@ See [deployment setup](docs/deployment.md) for Terraform, AWS OIDC, staging/prod
 - `Dockerfile`: shared non-root service image build.
 - `compose.yaml`: local Docker setup for all eleven projects.
 - `services.json`: shared manifest for CI, ECR repositories, and ECS services.
-- `infra/bootstrap`: protected Terraform state bucket and optional GitHub OIDC roles.
+- `infra/bootstrap`: separate protected staging/production state buckets and optional GitHub OIDC roles.
 - `infra/aws`: VPC, private ECS Fargate, ECR, API Gateway HTTP API, internal ALB, DynamoDB, S3, SNS/SQS and optional Valkey cache.
 - `infra/aws/environments`: staging and production Terraform inputs.
 - `infra/legacy-azure`: historical Bicep templates retained for reference.

@@ -42,13 +42,13 @@ Use Terraform 1.10+ (CI pins 1.13.5), AWS CLI/SSO credentials, and an AWS admini
 
 ```sh
 cp infra/bootstrap/terraform.tfvars.example infra/bootstrap/terraform.tfvars
-# Edit the globally unique bucket name and AWS region.
+# Edit both globally unique bucket names and the AWS region.
 terraform -chdir=infra/bootstrap init
 terraform -chdir=infra/bootstrap plan
 terraform -chdir=infra/bootstrap apply
 ```
 
-The state bucket blocks public access, requires TLS, encrypts objects, enables versioning and prevents accidental Terraform destruction. Keep the bootstrap's local state secure and backed up, or move it to a separate approved remote backend after creation. Never commit state.
+Bootstrap creates separate state buckets for `stg` and `prd`. Both block public access, require TLS, encrypt objects, enable versioning and prevent accidental Terraform destruction. Each bucket has its own environment/resource-group tags. Keep the bootstrap's local state secure and backed up, or move it to a separate approved remote backend after creation. Never commit state.
 
 Create GitHub environments `stg` and `prd`, with production branch restrictions/reviewers. Configure AWS OIDC roles trusted only for the matching GitHub environment subject:
 
@@ -57,13 +57,13 @@ repo:evotch/Cyllio:environment:stg
 repo:evotch/Cyllio:environment:prd
 ```
 
-`infra/bootstrap` can create those roles when `deployment_policy_arn` is supplied. It requires an administrator-reviewed managed deployment policy and does not attach AdministratorAccess. Set `github_repository` if this repository differs. If your AWS account already has the GitHub OIDC provider, pass `github_oidc_provider_arn` to reuse it. The roles receive environment-specific state/lock access in addition to your supplied deployment policy. Separate AWS accounts are recommended for production isolation; bootstrap in each account in that case.
+`infra/bootstrap` can create those roles when `deployment_policy_arn` is supplied. It requires an administrator-reviewed managed deployment policy and does not attach AdministratorAccess. Set `github_repository` if this repository differs. If your AWS account already has the GitHub OIDC provider, pass `github_oidc_provider_arn` to reuse it. Each role receives state/lock access only to its matching environment bucket in addition to your supplied deployment policy. Separate AWS accounts are recommended for production isolation; bootstrap in each account in that case.
 
 Your reviewed deployment policy must allow this stack's VPC/networking, ECS/ECR, ALB, API Gateway, Cloud Map/Route 53 private namespace, CloudWatch, Resource Groups/tagging, DynamoDB, KMS, S3, SNS/SQS and optional ElastiCache operations, including their required read/list operations. It must permit management of the `cyllio-<environment>-*` task/execution IAM roles and passing only those roles to ECS. Service-linked roles may need administrator creation on the first deployment. A deployment policy is an account-specific prerequisite, not generated as a wildcard administrator policy here.
 
 ## Plan and apply an environment
 
-Use separate state keys and initialization data for staging/production. Copy the backend example and edit the bucket/region:
+Use separate state buckets, state keys and initialization data for staging/production. Set each backend example to its matching bucket from the bootstrap `state_buckets` output. Copy the backend example and edit the bucket/region:
 
 ```sh
 cp infra/aws/environments/stg.s3.tfbackend.example infra/aws/environments/stg.s3.tfbackend
@@ -96,11 +96,11 @@ Set these GitHub **environment variables** for each environment (ARNs are refere
 | --- | --- |
 | `AWS_REGION` | Deployment/state region |
 | `AWS_ROLE_ARN` | Environment-specific OIDC deployment role |
-| `TF_STATE_BUCKET` | Existing bootstrap state bucket |
+| `TF_STATE_BUCKET` | Matching environment bucket from bootstrap `state_buckets` output |
 | `ACCOUNT_SECRET_ARN` | Optional compatibility secret; required when deploying current containers |
 | `ACCOUNT_SECRET_KMS_KEY_ARN` | Optional customer-managed key protecting that secret |
 
-**Every push or merge to `main` runs Deploy AWS and automatically applies staging Terraform only after the full CI workflow succeeds: .NET build/formatting, OTP tests, Terraform validation/tests, container smoke tests, account integration and broker integration.** CI is reused as a required job in Deploy AWS, so a failed or cancelled CI job prevents deployment of that commit. Pull requests run CI without deployment. Manual deployments also run full CI first. Push runs use the `stg` GitHub environment and `stg/terraform.tfstate`; production remains a manual deployment. The bootstrap state bucket and OIDC deployment role must already exist.
+**Every push or merge to `main` runs Deploy AWS and automatically applies staging Terraform only after the full CI workflow succeeds: .NET build/formatting, OTP tests, Terraform validation/tests, container smoke tests, account integration and broker integration.** CI is reused as a required job in Deploy AWS, so a failed or cancelled CI job prevents deployment of that commit. Pull requests run CI without deployment. Manual deployments also run full CI first. Push runs use the `stg` GitHub environment and `stg/terraform.tfstate`; production remains a manual deployment. The environment-specific bootstrap state bucket and OIDC deployment role must already exist.
 
 On the first main push, application services remain disabled and the pipeline creates the foundation/ECR repositories. If staging services are already enabled, later main pushes keep them enabled and build/push the new commit images before applying Terraform; `ACCOUNT_SECRET_ARN` must remain configured.
 
@@ -133,4 +133,14 @@ Applying staging creates AWS Resource Group `cyllio-stg`; applying production in
 
 The AWS provider supplies `Project`, `Environment`, `ManagedBy=Terraform` and `ResourceGroup=cyllio-<environment>` to every directly managed resource supporting tags. Per-service resources also receive `Service=<manifest service name>`. ECS services propagate their tags to launched tasks and enable ECS-managed tags. Resources such as IAM policy attachments, routes, subscriptions and bucket configuration objects that have no tag API remain associated with their tagged parent resource; they cannot carry independent tags or necessarily appear as group members. Existing externally supplied secrets/keys are not retagged by this stack.
 
-Bootstrap resources shared by both environments (state bucket and account-wide OIDC provider) use `Environment=shared` and `Component=terraform-bootstrap`. Bootstrap deployment roles override the environment/resource-group tags for their own staging or production environment. Terraform outputs expose `resource_group_name`, `resource_group_arn` and `resource_tags`. The deployment policy must include the Resource Groups create/read/update/delete and tag operations needed to manage these groups.
+The account-wide OIDC provider uses `Environment=shared` and `Component=terraform-bootstrap`. Each state bucket is tagged with its own `Environment=stg` or `Environment=prd` and matching `ResourceGroup`. Bootstrap deployment roles override the environment/resource-group tags for their own staging or production environment. Terraform outputs expose `resource_group_name`, `resource_group_arn` and `resource_tags`. The deployment policy must include the Resource Groups create/read/update/delete and tag operations needed to manage these groups.
+
+## Upgrading an existing shared state bucket
+
+Bootstrap now requires `state_bucket_names = { stg = "...", prd = "..." }` instead of `state_bucket_name`. If bootstrap has already created the old shared bucket, set the `stg` entry to that exact existing bucket name and choose a new, distinct `prd` name. The included Terraform `moved` blocks preserve the original bucket and its protection/configuration as the staging instance; they do not delete or copy state. Review the bootstrap plan before applying it.
+
+Set GitHub `stg` → `TF_STATE_BUCKET` to the staging bucket and `prd` → `TF_STATE_BUCKET` to the production bucket. A new setup needs no state migration. If production application state already exists in the former shared bucket, migrate that environment's backend with `terraform init -migrate-state` before using the new production bucket in Actions. Do not start a production apply against an empty state when resources already exist. Keep the old bucket and state until migration is verified. The roles' inline state policies grant access to their own bucket; the administrator-supplied deployment policy should not independently grant cross-environment state-bucket access.
+
+## Bootstrap without an existing deployment policy
+
+Set `create_deployment_policies=true` to create a separate Terraform deployment policy for each environment instead of supplying `deployment_policy_arn`. Each generated policy enables the infrastructure service operations used by this stack in the configured region, scopes S3 access to `cyllio-<environment>-*` buckets, and limits IAM task-role management and passing to the matching environment's task/execution roles. It does not attach AdministratorAccess. Regional infrastructure permissions cover those services throughout the selected region; they are not a strict cross-environment IAM isolation boundary. Use separate accounts or a separately reviewed external policy for stronger isolation. An externally supplied policy takes precedence.

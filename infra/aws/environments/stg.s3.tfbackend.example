@@ -1,4 +1,4 @@
-bucket       = "REPLACE_WITH_BOOTSTRAP_STATE_BUCKET"
+bucket       = "REPLACE_WITH_STG_STATE_BUCKET"
 key          = "stg/terraform.tfstate"
 region       = "us-east-1"
 encrypt      = true

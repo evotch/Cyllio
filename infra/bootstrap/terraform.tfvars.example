@@ -1,2 +1,9 @@
-aws_region        = "us-east-1"
-state_bucket_name = "cyllio-terraform-state-YOUR_ACCOUNT_ID"
+aws_region            = "us-west-2"
+state_bucket_names = {
+  stg = "cyllio-stg-terraform-state-YOUR_ACCOUNT_ID"
+  prd = "cyllio-prd-terraform-state-YOUR_ACCOUNT_ID"
+}
+github_repository     = "evotch/Cyllio"
+create_deployment_policies = true
+# Alternatively, use an existing reviewed policy:
+# deployment_policy_arn = "arn:aws:iam::YOUR_ACCOUNT_ID:policy/CyllioDeployment"

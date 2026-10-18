@@ -13,12 +13,12 @@ variable "deployment_policy_arn" {
   default     = null
 }
 resource "aws_iam_openid_connect_provider" "github" {
-  count          = var.deployment_policy_arn != null && var.github_oidc_provider_arn == null ? 1 : 0
+  count          = local.deployment_enabled && var.github_oidc_provider_arn == null ? 1 : 0
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
 }
 resource "aws_iam_role" "github" {
-  for_each = var.deployment_policy_arn == null ? toset([]) : toset(["stg", "prd"])
+  for_each = local.deployment_enabled ? toset(["stg", "prd"]) : toset([])
   name     = "${var.project_name}-${each.key}-github-deploy"
   tags = {
     Project       = var.project_name
@@ -39,16 +39,16 @@ resource "aws_iam_role" "github" {
 resource "aws_iam_role_policy_attachment" "deployment" {
   for_each   = aws_iam_role.github
   role       = each.value.name
-  policy_arn = var.deployment_policy_arn
+  policy_arn = var.deployment_policy_arn != null ? var.deployment_policy_arn : aws_iam_policy.deployment[each.key].arn
 }
 resource "aws_iam_role_policy" "state" {
   for_each = aws_iam_role.github
   role     = each.value.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.state.arn,
+    { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.state[each.key].arn,
     Condition = { StringLike = { "s3:prefix" = ["${each.key}/*"] } } },
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.state.arn}/${each.key}/terraform.tfstate" },
-    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = "${aws_s3_bucket.state.arn}/${each.key}/terraform.tfstate.tflock" }
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.state[each.key].arn}/${each.key}/terraform.tfstate" },
+    { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = "${aws_s3_bucket.state[each.key].arn}/${each.key}/terraform.tfstate.tflock" }
   ] })
 }
 output "github_deployment_roles" { value = { for environment, role in aws_iam_role.github : environment => role.arn } }
