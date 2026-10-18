@@ -8,3 +8,13 @@
 infra/**/*.json
 *.user
 .DS_Store
+
+# Terraform state, plans, local backend configuration and private inputs
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!infra/aws/environments/*.tfvars
+*.tfbackend
+crash.log

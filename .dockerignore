@@ -8,3 +8,8 @@ docs
 .env
 .env.*
 docker
+
+tests
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
