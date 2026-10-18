@@ -4,16 +4,19 @@ variables {
 }
 mock_provider "aws" {
   mock_resource "aws_iam_policy" {
-    defaults = { arn = "arn:aws:iam::123456789012:policy/mock-deployment-policy" }
+    override_during = plan
+    defaults        = { arn = "arn:aws:iam::123456789012:policy/mock-deployment-policy" }
   }
 }
 override_resource {
-  target = aws_s3_bucket.state["stg"]
-  values = { arn = "arn:aws:s3:::cyllio-stg-state-test" }
+  override_during = plan
+  target          = aws_s3_bucket.state["stg"]
+  values          = { arn = "arn:aws:s3:::cyllio-stg-state-test" }
 }
 override_resource {
-  target = aws_s3_bucket.state["prd"]
-  values = { arn = "arn:aws:s3:::cyllio-prd-state-test" }
+  override_during = plan
+  target          = aws_s3_bucket.state["prd"]
+  values          = { arn = "arn:aws:s3:::cyllio-prd-state-test" }
 }
 run "protected_state" {
   command = plan
@@ -42,7 +45,7 @@ run "protected_state" {
   }
 }
 run "environment_oidc_trust" {
-  command = apply
+  command = plan
   variables {
     state_bucket_names       = { stg = "cyllio-stg-state-test", prd = "cyllio-prd-state-test" }
     deployment_policy_arn    = "arn:aws:iam::123456789012:policy/CyllioDeployment"
@@ -73,7 +76,7 @@ run "environment_oidc_trust" {
 }
 
 run "generated_environment_policies" {
-  command = apply
+  command = plan
   variables {
     state_bucket_names         = { stg = "cyllio-stg-state-test", prd = "cyllio-prd-state-test" }
     create_deployment_policies = true
