@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Cyllio: Start local account stack",
+      "type": "process",
+      "command": "docker",
+      "args": ["compose", "--env-file", ".env.local", "-f", "compose.yaml", "up", "-d", "--build", "api", "identity", "device"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Cyllio: Stop local account stack",
+      "type": "process",
+      "command": "docker",
+      "args": ["compose", "--env-file", ".env.local", "-f", "compose.yaml", "stop", "api", "identity", "device", "dynamodb"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}
