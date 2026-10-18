@@ -25,6 +25,8 @@ jobs:
       MONGO_CONNECTION_STRING: ${{ secrets.MONGO_CONNECTION_STRING }}
       AUTH_SIGNING_KEY: ${{ secrets.AUTH_SIGNING_KEY }}
       AUTH_PHONE_HASH_KEY: ${{ secrets.AUTH_PHONE_HASH_KEY }}
+      ACS_SMS_CONNECTION_STRING: ${{ secrets.ACS_SMS_CONNECTION_STRING }}
+      ACS_SMS_SENDER: ${{ vars.ACS_SMS_SENDER }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -42,6 +44,11 @@ jobs:
           for key, name in names.items():
               if not values[key] or (key != 'mongoConnectionString' and len(values[key].encode()) < 32):
                   raise SystemExit('Configure GitHub environment secret ' + name)
+          acs_connection = os.environ.get('ACS_SMS_CONNECTION_STRING', '')
+          acs_sender = os.environ.get('ACS_SMS_SENDER', '')
+          if bool(acs_connection) != bool(acs_sender):
+              raise SystemExit('Configure both ACS_SMS_CONNECTION_STRING secret and ACS_SMS_SENDER variable')
+          values.update(acsSmsConnectionString=acs_connection, acsSmsSender=acs_sender)
           path = Path(os.environ['RUNNER_TEMP']) / 'account-parameters.json'
           path.write_text(json.dumps({'parameters': {key: {'value': value} for key, value in values.items()}}))
           path.chmod(0o600)

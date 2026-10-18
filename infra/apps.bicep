@@ -16,6 +16,9 @@ param authSigningKey string
 @secure()
 @minLength(32)
 param authPhoneHashKey string
+@secure()
+param acsSmsConnectionString string = ''
+param acsSmsSender string = ''
 resource appEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
   name: last(split(environmentId, '/'))
 }
@@ -33,11 +36,13 @@ resource apps 'Microsoft.App/containerApps@2024-03-01' = [for service in service
     managedEnvironmentId: environmentId
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: contains(accountServices, service.name) ? [
+      secrets: concat(contains(accountServices, service.name) ? [
         { name: 'mongo-connection', value: mongoConnectionString }
         { name: 'auth-signing-key', value: authSigningKey }
         { name: 'auth-phone-hash-key', value: authPhoneHashKey }
-      ] : []
+      ] : [], service.name == 'identity' && !empty(acsSmsConnectionString) ? [
+        { name: 'acs-sms-connection', value: acsSmsConnectionString }
+      ] : [])
       ingress: { external: service.external, targetPort: 8080, allowInsecure: false }
       registries: [{ server: registryServer, identity: identityId }]
     }
@@ -52,6 +57,10 @@ resource apps 'Microsoft.App/containerApps@2024-03-01' = [for service in service
             { name: 'Auth__SigningKey', secretRef: 'auth-signing-key' }
             { name: 'Auth__PhoneHashKey', secretRef: 'auth-phone-hash-key' }
             { name: 'Auth__EnableDevelopmentOtp', value: 'false' }
+          ] : [],
+          service.name == 'identity' && !empty(acsSmsConnectionString) ? [
+            { name: 'Auth__Sms__ConnectionString', secretRef: 'acs-sms-connection' }
+            { name: 'Auth__Sms__Sender', value: acsSmsSender }
           ] : [],
           service.name == 'api' ? [
             { name: 'Services__Identity', value: 'https://${projectName}-${environment}-identity.internal.${appEnvironment.properties.defaultDomain}/' }

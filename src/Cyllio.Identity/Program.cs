@@ -7,6 +7,7 @@ using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 builder.AddAccountFoundation();
 builder.Services.AddSingleton<DevelopmentOtpDelivery>();
+builder.Services.AddSingleton<OtpDelivery>();
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

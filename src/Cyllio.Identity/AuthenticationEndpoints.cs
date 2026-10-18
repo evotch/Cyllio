@@ -17,19 +17,20 @@ internal static partial class AuthenticationEndpoints
         auth.MapPost("/refresh", Refresh);
         auth.MapPost("/logout", Logout).RequireAuthorization();
         auth.MapPost("/logout-all", LogoutAll).RequireAuthorization();
-        if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Auth:EnableDevelopmentOtp"))
+        if (app.Services.GetRequiredService<OtpDelivery>().IsDevelopment)
             app.MapGet("/dev/otp/{verificationId}", (string verificationId, DevelopmentOtpDelivery delivery) =>
                 delivery.Get(verificationId) is { } code ? Results.Ok(new { code }) : Results.NotFound());
     }
 
     private static async Task<IResult> StartVerification(VerificationStartRequest body, HttpContext context,
-        AccountDatabase database, AccountTokens tokens, DevelopmentOtpDelivery delivery, IWebHostEnvironment environment,
-        IConfiguration configuration, CancellationToken cancellationToken)
+        AccountDatabase database, AccountTokens tokens, OtpDelivery delivery, CancellationToken cancellationToken)
     {
         if (body.PhoneNumber is null || !PhonePattern().IsMatch(body.PhoneNumber) || body.Channel is not ("sms" or "voice"))
             return AccountApi.Invalid("Use an E.164 phone number and sms or voice channel.");
-        if (!environment.IsDevelopment() || !configuration.GetValue<bool>("Auth:EnableDevelopmentOtp"))
+        if (!delivery.IsAvailable)
             return Results.Problem(statusCode: 503, title: "OTP provider is not configured");
+        if (body.Channel != "sms" && !delivery.IsDevelopment)
+            return AccountApi.Invalid("Only sms verification is supported by the configured provider.");
         var now = DateTime.UtcNow;
         var phoneHash = tokens.PhoneHash(body.PhoneNumber);
         if (await database.Challenges.Find(x => x.PhoneHash == phoneHash && x.CreatedAt > now.AddSeconds(-30)).AnyAsync(cancellationToken))
@@ -49,7 +50,13 @@ internal static partial class AuthenticationEndpoints
         try { await database.Challenges.InsertOneAsync(challenge, cancellationToken: cancellationToken); }
         catch (MongoWriteException error) when (error.WriteError.Category == ServerErrorCategory.DuplicateKey)
         { return Results.Problem(statusCode: 429, title: "Verification cooldown"); }
-        delivery.Store(challenge.Id, code, challenge.ExpiresAt);
+        if (!await delivery.SendAsync(body.PhoneNumber, challenge.Id, code, challenge.ExpiresAt, cancellationToken))
+        {
+            // Keep the cooldown reservation, but make an undelivered code unusable.
+            await database.Challenges.UpdateOneAsync(x => x.Id == challenge.Id,
+                Builders<VerificationChallenge>.Update.Set(x => x.ExpiresAt, DateTime.UtcNow), cancellationToken: cancellationToken);
+            return Results.Problem(statusCode: 503, title: "SMS delivery unavailable", detail: "Please try again later.");
+        }
         return Results.Accepted(value: new { verificationId = challenge.Id, challenge.ExpiresAt, retryAfterSeconds = 30 });
     }
 

@@ -15,6 +15,8 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet restore Cyllio.sln
       - run: dotnet build Cyllio.sln -c Release --no-restore
+      - name: Verify OTP delivery without sending SMS
+        run: dotnet run --project tests/Cyllio.Otp.Tests -c Release
       - run: dotnet format Cyllio.sln --verify-no-changes --no-restore
       - name: Validate infrastructure
         run: |

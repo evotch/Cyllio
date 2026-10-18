@@ -22,7 +22,7 @@ Also set these GitHub **environment secrets** for the account APIs:
 | `AUTH_SIGNING_KEY` | Independent random signing secret of at least 32 bytes. |
 | `AUTH_PHONE_HASH_KEY` | Independent stable random phone-lookup secret of at least 32 bytes. |
 
-The pipeline validates these before creating Azure resources and passes them through a protected temporary parameter file into Container App secrets. API routes use the account services' internal HTTPS addresses. The development OTP provider is disabled in Azure; a production SMS/voice adapter still needs implementation before phone verification can run there. The local MongoDB container is not deployed by Bicep.
+The pipeline validates these before creating Azure resources and passes them through a protected temporary parameter file into Container App secrets. API routes use the account services' internal HTTPS addresses. The development OTP provider is disabled in Azure; configure the optional ACS SMS settings below to enable real verification messages (voice verification is not supported). The local MongoDB container is not deployed by Bicep.
 
 Use Azure CLI as an Azure administrator to create the group and deployment identity (replace placeholders):
 
@@ -82,3 +82,37 @@ To roll back, run the deployment workflow against a previous known-good commit t
 - [.NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy)
 - [Container Apps managed identity image pulls](https://learn.microsoft.com/en-us/azure/container-apps/managed-identity-image-pull)
 - [Azure Login with OIDC](https://github.com/Azure/login#login-with-openid-connect-oidc-recommended)
+
+## Azure Communication Services verification SMS
+
+Use an existing ACS resource with an SMS-capable sender approved for your recipient destinations. The backend generates and verifies the code; ACS only transports the SMS. The public endpoint remains `POST /api/v1/auth/verification/start` with `channel: "sms"`. A 202 means ACS accepted the message, not that the handset received it. No live SMS is sent during builds or automated tests.
+
+For Compose, set these in your ignored `.env` file:
+
+```dotenv
+ACS_SMS_CONNECTION_STRING=endpoint=https://YOUR-RESOURCE.communication.azure.com/;accesskey=YOUR-KEY
+ACS_SMS_SENDER=+YOUR_SMS_ENABLED_NUMBER
+AUTH_ENABLE_DEVELOPMENT_OTP=false
+```
+
+Recreate Identity with `docker compose up -d --build identity`. Do not put ACS credentials in the iPhone app or commit `.env`. Sender can also be an approved short code or alphanumeric sender ID where supported. The resource/sender must support the destination country.
+
+For the Azure deployment workflow, configure GitHub environment secret `ACS_SMS_CONNECTION_STRING` and environment variable `ACS_SMS_SENDER` together. Bicep places the connection string in an Identity Container App secret; other services do not receive it. Leaving both absent keeps real SMS disabled. Deployment does not create or modify your ACS resource.
+
+Any ACS configuration disables the development OTP endpoint, including in Development. Partial configuration cannot fall back to locally retrievable codes. Failed/rejected SMS returns a generic 503 and invalidates the challenge while retaining its resend cooldown. Existing code expiry, attempt limits and phone cooldown remain in place. Automatic SDK retries are disabled to avoid duplicate sends after ambiguous timeouts. The application does not log phone numbers, codes, connection strings or provider error bodies.
+
+Validate with a controlled recipient after configuration: start verification, read the SMS, then confirm using the returned verification ID and your six-digit code. Real sends incur your ACS charges. The development integration script uses fake phone numbers and must only run with ACS settings unset.
+
+Run the isolated provider checks with `dotnet run --project tests/Cyllio.Otp.Tests`. These use a fake SDK client and never contact ACS.
+
+## Environment files
+
+Private `.env.local`, `.env.stg`, and `.env.prd` files select Development, Staging, and Production respectively. Each has independently generated signing/phone-hash secrets and a SQL emulator password, with owner-only file permissions. They are ignored by Git. Existing `.env` is unchanged. Local enables development OTP; staging and production disable it and require both ACS settings for SMS verification. ACS credentials are left blank for you to configure separately in each file.
+
+```sh
+docker compose --env-file .env.local up -d --build api identity device
+docker compose --env-file .env.stg up -d --build api identity device
+docker compose --env-file .env.prd up -d --build api identity device
+```
+
+Select one profile at a time: the Compose stack still uses the same host ports. Project names isolate each profile's containers and volumes. These commands run the existing Compose stack with the selected application environment; cloud deployments continue to use GitHub environment secrets and Bicep. Env files do not provision hosted staging or production infrastructure. Accept the emulator licenses before setting `ACCEPT_EULA=Y` and starting emulator-backed services. Keep `AUTH_PHONE_HASH_KEY` stable once an environment has accounts because it determines phone-number lookup hashes.

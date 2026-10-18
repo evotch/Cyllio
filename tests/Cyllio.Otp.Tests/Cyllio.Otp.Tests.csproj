@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Azure.Communication.Sms" Version="1.0.2" />
+    <Compile Include="../../src/Cyllio.Identity/OtpDelivery.cs" Link="OtpDelivery.cs" />
+    <Compile Include="../../src/Cyllio.Identity/DevelopmentOtpDelivery.cs" Link="DevelopmentOtpDelivery.cs" />
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+</Project>

@@ -3,14 +3,14 @@ name: cyllio
 x-service-defaults: &service-defaults
   restart: unless-stopped
   environment:
-    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
     ASPNETCORE_HTTP_PORTS: "8080"
 
 services:
   api:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       Services__Identity: "http://identity:8080/"
       Services__Device: "http://device:8080/"
@@ -31,13 +31,15 @@ services:
   identity:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
       Mongo__Database: cyllio_accounts
       Auth__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
       Auth__PhoneHashKey: ${AUTH_PHONE_HASH_KEY:?Set AUTH_PHONE_HASH_KEY in .env}
-      Auth__EnableDevelopmentOtp: "true"
+      Auth__EnableDevelopmentOtp: ${AUTH_ENABLE_DEVELOPMENT_OTP:-true}
+      Auth__Sms__ConnectionString: ${ACS_SMS_CONNECTION_STRING:-}
+      Auth__Sms__Sender: ${ACS_SMS_SENDER:-}
     depends_on:
       mongo:
         condition: service_healthy
@@ -53,7 +55,7 @@ services:
   device:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       Mongo__ConnectionString: "mongodb://mongo:27017/?replicaSet=rs0"
       Mongo__Database: cyllio_accounts
@@ -74,7 +76,7 @@ services:
   messaging:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
     depends_on:
@@ -92,7 +94,7 @@ services:
   realtime:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
     depends_on:
@@ -154,7 +156,7 @@ services:
   notification:
     <<: *service-defaults
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
     depends_on:

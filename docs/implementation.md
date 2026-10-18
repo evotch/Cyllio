@@ -6,7 +6,7 @@ Source: `messaging_backend_api_specification_v1.3_privacy_preferences.docx`, ver
 
 | Area | Implemented behavior |
 | --- | --- |
-| Authentication (section 2) | Start and confirm phone verification through an explicitly enabled local OTP provider; single-use registration/login proof; register an account with initial public device keys; OTP login to an existing account-bound device; 10-minute signed access tokens; hashed 30-day refresh tokens with atomic rotation; logout and logout-all. |
+| Authentication (section 2) | Start and confirm phone verification through Azure Communication Services SMS or an explicitly enabled local OTP provider; single-use registration/login proof; register an account with initial public device keys; OTP login to an existing account-bound device; 10-minute signed access tokens; hashed 30-day refresh tokens with atomic rotation; logout and logout-all. |
 | Profile (section 3) | Read and update the caller's own display name, about and avatar reference; ETag/If-Match concurrency. |
 | Devices (sections 4, 29) | List the caller's active devices; update the current device's push capability; revoke an owned device and its sessions immediately. Separate accounts on a shared installation remain isolated. |
 | Privacy (section 31) | Persist all account preference fields from section 31 with value validation and ETag/If-Match concurrency. This stores policy; communication enforcement awaits the corresponding APIs. |
@@ -57,7 +57,7 @@ curl -X POST http://localhost:8080/api/v1/auth/verification/start \
 curl http://localhost:8081/dev/otp/<verificationId>
 ```
 
-Confirmation returns a registration token, not an account token. Verification expires after five minutes, accepts at most five attempts, and has a per-phone cooldown plus per-process IP throttling. Codes are never logged or stored as plaintext in MongoDB. The development provider stores codes in expiring process memory and is exposed only when both Development and the explicit setting are enabled. Real SMS/voice delivery must be configured before enabling registration in a production environment; currently production verification start returns 503.
+Confirmation returns a registration token, not an account token. Verification expires after five minutes, accepts at most five attempts, and has a per-phone cooldown plus per-process IP throttling. Codes are never logged or stored as plaintext in MongoDB. The development provider stores codes in expiring process memory and is exposed only when both Development and the explicit setting are enabled. Real SMS uses Azure Communication Services when `Auth:Sms:ConnectionString` and `Auth:Sms:Sender` are configured. Without ACS configuration, production verification start returns 503. Voice delivery is not implemented. ACS configuration disables the development OTP retrieval endpoint. See [deployment setup](deployment.md#azure-communication-services-verification-sms).
 
 GET profile/privacy responses include `ETag`. Supply that value in `If-Match` when updating. Missing versions return 428; stale versions return 412. Ownership always comes from the signed token, never a body-supplied user or installation ID. Device lists omit public keys, push tokens and refresh-token hashes.
 
@@ -71,7 +71,7 @@ The existing Service Bus probe remains separate. Registration/device mutations a
 
 ## Remaining implementation order
 
-1. Complete account lifecycle: production OTP provider, cryptographic device possession/link approval, recovery, account deletion, installation authentication, idempotency responses, durable distributed rate limits, contacts, blocks and privacy exceptions.
+1. Complete account lifecycle: cryptographic device possession/link approval, recovery, account deletion, installation authentication, idempotency responses, durable distributed rate limits, contacts, blocks and privacy exceptions.
 2. Public key inventory and atomic prekey claim APIs; key/version metadata and secure device-change events.
 3. Direct conversations and encrypted message persistence with authorization, idempotency, sequencing, transactional outbox and durable sync.
 4. Group membership, permissions, history boundaries and device-specific encrypted history-transfer packages.
