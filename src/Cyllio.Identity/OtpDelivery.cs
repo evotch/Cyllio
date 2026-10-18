@@ -31,18 +31,18 @@ internal sealed class OtpDelivery : IDisposable
         var section = configuration.GetSection("Auth:Sms:OriginationIdentities");
         foreach (var country in new[] { "US", "BG" })
             if (!string.IsNullOrWhiteSpace(section[country])) senders[country] = section[country]!;
-        
+
         configurationSet = configuration["Auth:Sms:ConfigurationSet"];
-        
+
         var region = configuration["Auth:Sms:Region"] ?? configuration["AWS_REGION"];
-        
+
         // Explicit/partial AWS configuration (and obsolete ACS settings) must never expose codes via /dev/otp.
         var configured = configuration.GetValue<bool>("Auth:Sms:Enabled") || section.GetChildren().Any(child => !string.IsNullOrWhiteSpace(child.Value)) ||
             !string.IsNullOrWhiteSpace(configurationSet) || !string.IsNullOrWhiteSpace(configuration["Auth:Sms:ConnectionString"]) ||
             !string.IsNullOrWhiteSpace(configuration["Auth:Sms:Sender"]);
-        
+
         IsDevelopment = !configured && environment.IsDevelopment() && configuration.GetValue<bool>("Auth:EnableDevelopmentOtp");
-        
+
         if (senders.Count > 0 && !string.IsNullOrWhiteSpace(region) && !string.IsNullOrWhiteSpace(configurationSet))
         {
             // Credentials come from the AWS default chain (ECS task role in AWS), never ACS keys.
