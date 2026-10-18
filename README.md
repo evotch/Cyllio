@@ -42,7 +42,7 @@ python3 scripts/test-accounts.py
 
 ## Run all services with Docker Compose
 
-With Docker running, configure the local Service Bus emulator before starting the stack. Copy `.env.example` to `.env` if it does not already exist, set a strong `MSSQL_SA_PASSWORD` and independent `AUTH_SIGNING_KEY` / `AUTH_PHONE_HASH_KEY` secrets of at least 32 bytes, and set `ACCEPT_EULA=Y` after accepting the [Service Bus emulator license](https://github.com/Azure/azure-service-bus-emulator-installer/blob/main/EMULATOR_EULA.txt) and [SQL Server Linux license](https://go.microsoft.com/fwlink/?LinkId=746388). `.env` is ignored by Git and excluded from Docker builds.
+With Docker running, configure the local Service Bus emulator before starting the stack. Use your private `.env.local` file with `docker compose --env-file .env.local`, set a strong `MSSQL_SA_PASSWORD` and independent `AUTH_SIGNING_KEY` / `AUTH_PHONE_HASH_KEY` secrets of at least 32 bytes, and set `ACCEPT_EULA=Y` after accepting the [Service Bus emulator license](https://github.com/Azure/azure-service-bus-emulator-installer/blob/main/EMULATOR_EULA.txt) and [SQL Server Linux license](https://go.microsoft.com/fwlink/?LinkId=746388). `.env` is ignored by Git and excluded from Docker builds.
 
 Start all eleven projects, MongoDB and the two emulator containers from the repository root:
 

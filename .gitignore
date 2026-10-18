@@ -4,7 +4,6 @@
 .idea/
 .env
 .env.*
-!.env.example
 infra/**/*.json
 *.user
 .DS_Store
