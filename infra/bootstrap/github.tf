@@ -1,3 +1,15 @@
+variable "github_oidc_repository" {
+  description = "Repository identity in the GitHub OIDC subject, e.g. owner@OWNER_ID/repo@REPO_ID for immutable subjects. Defaults to github_repository for legacy subjects."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.github_oidc_repository == null ? true : can(regex("^[^/: ]+/[^/: ]+$", var.github_oidc_repository))
+    error_message = "Use the exact owner/repository identity from the OIDC subject, without the repo: prefix or environment suffix."
+  }
+}
+locals {
+  github_subject_repository = coalesce(var.github_oidc_repository, var.github_repository)
+}
 variable "github_repository" {
   type    = string
   default = "evotch/Cyllio"
@@ -32,7 +44,7 @@ resource "aws_iam_role" "github" {
     Principal = { Federated = var.github_oidc_provider_arn != null ? var.github_oidc_provider_arn : aws_iam_openid_connect_provider.github[0].arn },
     Condition = { StringEquals = {
       "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:environment:${each.key}"
+      "token.actions.githubusercontent.com:sub" = "repo:${local.github_subject_repository}:environment:${each.key}"
     } }
   }] })
 }

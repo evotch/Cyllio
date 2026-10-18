@@ -1,4 +1,5 @@
 variables {
+  github_oidc_repository     = null
   create_deployment_policies = false
   deployment_policy_arn      = null
 }
@@ -92,5 +93,22 @@ run "generated_environment_policies" {
       jsondecode(policy.policy).Statement[1].Resource[0] == "arn:aws:s3:::cyllio-${env}-*"
     ])
     error_message = "Generated deployment policies must scope S3 access by environment."
+  }
+}
+
+run "immutable_repository_subject" {
+  command = plan
+  variables {
+    state_bucket_names       = { stg = "cyllio-stg-state-test", prd = "cyllio-prd-state-test" }
+    deployment_policy_arn    = "arn:aws:iam::123456789012:policy/CyllioDeployment"
+    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    github_oidc_repository   = "evotch@15218305/Cyllio@1409423918"
+  }
+  assert {
+    condition = alltrue([for environment, role in aws_iam_role.github :
+      jsondecode(role.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:evotch@15218305/Cyllio@1409423918:environment:${environment}" &&
+      jsondecode(role.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
+    ])
+    error_message = "Immutable repository subjects must retain exact repository IDs, audience and environment boundaries."
   }
 }

@@ -144,3 +144,7 @@ Set GitHub `stg` → `TF_STATE_BUCKET` to the staging bucket and `prd` → `TF_S
 ## Bootstrap without an existing deployment policy
 
 Set `create_deployment_policies=true` to create a separate Terraform deployment policy for each environment instead of supplying `deployment_policy_arn`. Each generated policy enables the infrastructure service operations used by this stack in the configured region, scopes S3 access to `cyllio-<environment>-*` buckets, and limits IAM task-role management and passing to the matching environment's task/execution roles. It does not attach AdministratorAccess. Regional infrastructure permissions cover those services throughout the selected region; they are not a strict cross-environment IAM isolation boundary. Use separate accounts or a separately reviewed external policy for stronger isolation. An externally supplied policy takes precedence.
+
+## GitHub OIDC immutable repository subjects
+
+Newer GitHub repositories include immutable owner/repository IDs in the OIDC subject. For this repository, CloudTrail recorded `repo:evotch@15218305/Cyllio@1409423918:environment:stg`. Configure `github_oidc_repository="evotch@15218305/Cyllio@1409423918"` in bootstrap; Terraform appends the matching environment for each role. `github_repository` remains the normal `evotch/Cyllio` repository name. Legacy subjects are supported by leaving the override null. Never replace exact environment trust with a broad repository wildcard to work around a mismatch. Inspect only the subject/audience/role metadata, not the full signed token.

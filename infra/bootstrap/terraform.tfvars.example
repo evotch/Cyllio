@@ -7,3 +7,6 @@ github_repository     = "evotch/Cyllio"
 create_deployment_policies = true
 # Alternatively, use an existing reviewed policy:
 # deployment_policy_arn = "arn:aws:iam::YOUR_ACCOUNT_ID:policy/CyllioDeployment"
+
+# Exact immutable repository identity observed in GitHub OIDC for this repository.
+github_oidc_repository = "evotch@15218305/Cyllio@1409423918"
