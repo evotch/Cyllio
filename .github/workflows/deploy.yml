@@ -27,25 +27,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: '1.13.5'
-          terraform_wrapper: false
-      - name: Validate Terraform before deployment
-        run: |
-          set -euo pipefail
-          terraform fmt -check -recursive infra/aws infra/bootstrap
-          terraform -chdir=infra/aws init -backend=false -input=false
-          terraform -chdir=infra/aws validate
-          terraform -chdir=infra/aws test
-          terraform -chdir=infra/bootstrap init -backend=false -input=false
-          terraform -chdir=infra/bootstrap validate
-          terraform -chdir=infra/bootstrap test
-      - name: Verify deployment selection
-        run: python3 -m unittest discover -s tests/pipeline -v
+    uses: ./.github/workflows/ci.yml
   deploy:
     needs: validate
     permissions:

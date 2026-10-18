@@ -1,8 +1,7 @@
 name: CI
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -31,6 +30,8 @@ jobs:
           terraform -chdir=infra/bootstrap init -backend=false -input=false
           terraform -chdir=infra/bootstrap validate
           terraform -chdir=infra/bootstrap test
+      - name: Verify deployment selection
+        run: python3 -m unittest discover -s tests/pipeline -v
       - name: Validate Compose configuration
         run: docker compose --env-file .env.example config --quiet
       - name: Build and smoke test every service

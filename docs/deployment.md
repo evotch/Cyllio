@@ -100,7 +100,7 @@ Set these GitHub **environment variables** for each environment (ARNs are refere
 | `ACCOUNT_SECRET_ARN` | Optional compatibility secret; required when deploying current containers |
 | `ACCOUNT_SECRET_KMS_KEY_ARN` | Optional customer-managed key protecting that secret |
 
-**Every push or merge to `main` runs Deploy AWS and automatically applies staging Terraform after formatting, validation and mocked-provider tests pass.** Push runs use the `stg` GitHub environment and `stg/terraform.tfstate`; production remains a manual deployment. The bootstrap state bucket and OIDC deployment role must already exist.
+**Every push or merge to `main` runs Deploy AWS and automatically applies staging Terraform only after the full CI workflow succeeds: .NET build/formatting, OTP tests, Terraform validation/tests, container smoke tests, account integration and broker integration.** CI is reused as a required job in Deploy AWS, so a failed or cancelled CI job prevents deployment of that commit. Pull requests run CI without deployment. Manual deployments also run full CI first. Push runs use the `stg` GitHub environment and `stg/terraform.tfstate`; production remains a manual deployment. The bootstrap state bucket and OIDC deployment role must already exist.
 
 On the first main push, application services remain disabled and the pipeline creates the foundation/ECR repositories. If staging services are already enabled, later main pushes keep them enabled and build/push the new commit images before applying Terraform; `ACCOUNT_SECRET_ARN` must remain configured.
 
